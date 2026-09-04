@@ -1,18 +1,4 @@
 {
-  "compilerOptions": {
-    "declaration": true,
-    "declarationMap": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "skipLibCheck": true,
-    "sourceMap": true,
-    "strict": true,
-    "target": "ES2022"
-  },
-  "exclude": ["node_modules", "dist"],
-  "include": ["src/**/*"]
+  "extends": "../../tsconfig.base.json",
+  "include": ["src/**/*", "vitest.config.ts"]
 }

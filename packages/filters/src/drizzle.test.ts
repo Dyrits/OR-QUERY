@@ -1,466 +1,161 @@
-import type { AnyColumn } from "drizzle-orm";
-import { describe, expect, it, vi } from "vitest";
-import { buildDrizzleFilters, type GetColumn } from "./build-drizzle";
+import { getTableColumns, type SQL } from "drizzle-orm";
+import { integer, PgDialect, pgTable, QueryBuilder, text, timestamp } from "drizzle-orm/pg-core";
+import { describe, expect, it } from "vitest";
+import { buildDrizzleFilters, buildDrizzleOrder, buildDrizzleSelect, buildDrizzleWhere } from "./drizzle";
 import type { QueryFilters } from "./types";
 
-// Mock column factory
-function createMockColumn(name: string): AnyColumn {
-  return { name } as unknown as AnyColumn;
+const users = pgTable("users", {
+  age: integer("age"),
+  createdAt: timestamp("created_at"),
+  email: text("email"),
+  id: integer("id").primaryKey(),
+  name: text("name").notNull(),
+  role: text("role"),
+  status: text("status"),
+});
+
+type User = typeof users.$inferSelect & { posts: { id: number }[] };
+
+const dialect = new PgDialect();
+
+function render(condition: SQL | undefined) {
+  if (!condition) {
+    return undefined;
+  }
+  const { params, sql } = dialect.sqlToQuery(condition);
+  return { params, sql };
 }
 
-// Mock getColumn function
-const mockGetColumn: GetColumn = (field: string) => createMockColumn(field);
+describe("buildDrizzleWhere", () => {
+  it("returns undefined when there is no condition", () => {
+    expect(buildDrizzleWhere<User>(undefined, users)).toBeUndefined();
+    expect(buildDrizzleWhere<User>({}, users)).toBeUndefined();
+    expect(buildDrizzleWhere<User>({ name: undefined, status: { Is: undefined } }, users)).toBeUndefined();
+    expect(buildDrizzleWhere<User>({ OneOf: [] }, users)).toBeUndefined();
+  });
 
-// Test entity type
-interface User {
-  id: number;
-  name: string;
-  email: string;
-  age: number;
-  status: string;
-  role: string;
-  createdAt: Date;
-}
+  it.each([
+    ["Is", { name: { Is: "john" } }, '"users"."name" = $1', ["john"]],
+    ["IsNot", { status: { IsNot: "inactive" } }, '"users"."status" <> $1', ["inactive"]],
+    ["GT", { age: { GT: 18 } }, '"users"."age" > $1', [18]],
+    ["GTE", { age: { GTE: 21 } }, '"users"."age" >= $1', [21]],
+    ["LT", { age: { LT: 65 } }, '"users"."age" < $1', [65]],
+    ["LTE", { age: { LTE: 100 } }, '"users"."age" <= $1', [100]],
+    ["In", { status: { In: ["active", "pending"] } }, '"users"."status" in ($1, $2)', ["active", "pending"]],
+    ["NotIn", { id: { NotIn: [1, 2] } }, '"users"."id" not in ($1, $2)', [1, 2]],
+    ["Contains", { name: { Contains: "john" } }, '"users"."name" ilike $1', ["%john%"]],
+    ["StartsWith", { email: { StartsWith: "admin" } }, '"users"."email" ilike $1', ["admin%"]],
+    ["EndsWith", { email: { EndsWith: "@example.com" } }, '"users"."email" ilike $1', ["%@example.com"]],
+    ["IsNull", { email: { IsNull: true } }, '"users"."email" is null', []],
+    ["IsNotNull", { email: { IsNotNull: true } }, '"users"."email" is not null', []],
+  ] as const)("maps %s", (_operator, where, sql, params) => {
+    expect(render(buildDrizzleWhere<User>(where, users))).toEqual({ params, sql });
+  });
+
+  it("escapes LIKE wildcards in text operators", () => {
+    expect(render(buildDrizzleWhere<User>({ name: { Contains: "50%_off" } }, users))).toEqual({ params: ["%50\\%\\_off%"], sql: '"users"."name" ilike $1' });
+  });
+
+  it("ignores IsNull and IsNotNull when set to false", () => {
+    expect(buildDrizzleWhere<User>({ email: { IsNotNull: false, IsNull: false } }, users)).toBeUndefined();
+  });
+
+  it("keeps falsy values such as 0", () => {
+    expect(render(buildDrizzleWhere<User>({ age: { Is: 0 } }, users))).toEqual({ params: [0], sql: '"users"."age" = $1' });
+  });
+
+  it("combines operators and fields with AND", () => {
+    expect(render(buildDrizzleWhere<User>({ age: { GTE: 18, LTE: 65 }, status: { Is: "active" } }, users))).toEqual({
+      params: [18, 65, "active"],
+      sql: '("users"."age" >= $1 and "users"."age" <= $2 and "users"."status" = $3)',
+    });
+  });
+
+  it("maps OneOf to OR combined with the other conditions", () => {
+    expect(render(buildDrizzleWhere<User>({ age: { GTE: 18 }, OneOf: [{ status: { Is: "active" } }, { role: { Is: "admin" } }] }, users))).toEqual({
+      params: [18, "active", "admin"],
+      sql: '("users"."age" >= $1 and ("users"."status" = $2 or "users"."role" = $3))',
+    });
+  });
+
+  it("supports nested OneOf groups", () => {
+    const where = { OneOf: [{ name: { Is: "a" }, OneOf: [{ age: { Is: 1 } }, { age: { Is: 2 } }] }, { role: { Is: "admin" } }] };
+
+    expect(render(buildDrizzleWhere<User>(where, users))).toEqual({
+      params: ["a", 1, 2, "admin"],
+      sql: '(("users"."name" = $1 and ("users"."age" = $2 or "users"."age" = $3)) or "users"."role" = $4)',
+    });
+  });
+
+  it("accepts a record of columns or a resolver function as column source", () => {
+    const columns = getTableColumns(users);
+
+    expect(render(buildDrizzleWhere<User>({ name: { Is: "john" } }, columns))).toEqual({ params: ["john"], sql: '"users"."name" = $1' });
+    expect(render(buildDrizzleWhere<User>({ name: { Is: "john" } }, (field) => columns[field as keyof typeof columns]))).toEqual({
+      params: ["john"],
+      sql: '"users"."name" = $1',
+    });
+  });
+
+  it("throws on unknown columns", () => {
+    expect(() => buildDrizzleWhere<Record<string, unknown>>({ posts: { IsNull: true } }, users)).toThrow('Unknown column "posts"');
+  });
+});
+
+describe("buildDrizzleOrder", () => {
+  it("returns an empty array when there is nothing to sort", () => {
+    expect(buildDrizzleOrder<User>(undefined, users)).toEqual([]);
+    expect(buildDrizzleOrder<User>({ name: undefined }, users)).toEqual([]);
+  });
+
+  it("preserves sort priority", () => {
+    const [first, second] = buildDrizzleOrder<User>({ age: "desc", name: "asc" }, users);
+
+    expect(render(first)).toEqual({ params: [], sql: '"users"."age" desc' });
+    expect(render(second)).toEqual({ params: [], sql: '"users"."name" asc' });
+  });
+});
+
+describe("buildDrizzleSelect", () => {
+  it("returns undefined when nothing is selected", () => {
+    expect(buildDrizzleSelect<User>(undefined, users)).toBeUndefined();
+    expect(buildDrizzleSelect<User>({ id: false }, users)).toBeUndefined();
+  });
+
+  it("maps selected fields to columns", () => {
+    expect(buildDrizzleSelect<User>({ id: true, name: true }, users)).toEqual({ id: users.id, name: users.name });
+  });
+
+  it("rejects nested selections", () => {
+    expect(() => buildDrizzleSelect<User>({ posts: { select: { id: true } } }, users)).toThrow("Nested selection");
+  });
+});
 
 describe("buildDrizzleFilters", () => {
-  describe("empty and undefined filters", () => {
-    it("should return sql`true` when filters.where is undefined", () => {
-      const filters: QueryFilters<User> = {};
-      const result = buildDrizzleFilters(filters, mockGetColumn);
+  it("builds a complete query", () => {
+    const filters: QueryFilters<User> = {
+      limit: 10,
+      offset: 20,
+      order: { createdAt: "desc" },
+      select: { id: true, name: true },
+      where: { age: { GTE: 18 } },
+    };
+    const { limit, offset, orderBy, select, where } = buildDrizzleFilters(filters, users);
+    const query = new QueryBuilder()
+      .select(select ?? getTableColumns(users))
+      .from(users)
+      .where(where)
+      .orderBy(...orderBy)
+      .limit(limit as number)
+      .offset(offset as number);
 
-      expect(result.where).toBeDefined();
-      // The SQL object should represent `true`
-      expect(result.where.queryChunks).toBeDefined();
-    });
-
-    it("should return sql`true` when filters.where is empty object", () => {
-      const filters: QueryFilters<User> = { where: {} };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("Is operator", () => {
-    it("should create equality condition", () => {
-      const filters: QueryFilters<User> = {
-        where: { name: { Is: "john" } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-
-    it("should handle numeric Is condition", () => {
-      const filters: QueryFilters<User> = {
-        where: { age: { Is: 25 } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
+    expect(query.toSQL()).toEqual({
+      params: [18, 10, 20],
+      sql: 'select "id", "name" from "users" where "users"."age" >= $1 order by "users"."created_at" desc limit $2 offset $3',
     });
   });
 
-  describe("IsNot operator", () => {
-    it("should create inequality condition", () => {
-      const filters: QueryFilters<User> = {
-        where: { status: { IsNot: "inactive" } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("GT operator", () => {
-    it("should create greater than condition", () => {
-      const filters: QueryFilters<User> = {
-        where: { age: { GT: 18 } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("GTE operator", () => {
-    it("should create greater than or equal condition", () => {
-      const filters: QueryFilters<User> = {
-        where: { age: { GTE: 21 } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("LT operator", () => {
-    it("should create less than condition", () => {
-      const filters: QueryFilters<User> = {
-        where: { age: { LT: 65 } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("LTE operator", () => {
-    it("should create less than or equal condition", () => {
-      const filters: QueryFilters<User> = {
-        where: { age: { LTE: 100 } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("In operator", () => {
-    it("should create in array condition", () => {
-      const filters: QueryFilters<User> = {
-        where: { status: { In: ["active", "pending"] } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-
-    it("should handle numeric array", () => {
-      const filters: QueryFilters<User> = {
-        where: { id: { In: [1, 2, 3] } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("NotIn operator", () => {
-    it("should create not in array condition", () => {
-      const filters: QueryFilters<User> = {
-        where: { status: { NotIn: ["banned", "deleted"] } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("Contains operator", () => {
-    it("should create ilike condition with wildcards on both sides", () => {
-      const filters: QueryFilters<User> = {
-        where: { name: { Contains: "john" } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("StartsWith operator", () => {
-    it("should create ilike condition with wildcard at end", () => {
-      const filters: QueryFilters<User> = {
-        where: { email: { StartsWith: "admin" } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("EndsWith operator", () => {
-    it("should create ilike condition with wildcard at start", () => {
-      const filters: QueryFilters<User> = {
-        where: { email: { EndsWith: "@example.com" } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("IsNull operator", () => {
-    it("should create isNull condition", () => {
-      const filters: QueryFilters<User> = {
-        where: { email: { IsNull: null } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-
-    it("should work regardless of the value provided", () => {
-      const filters: QueryFilters<User> = {
-        where: { email: { IsNull: true as unknown as null } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("IsNotNull operator", () => {
-    it("should create isNotNull condition", () => {
-      const filters: QueryFilters<User> = {
-        where: { email: { IsNotNull: null } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("multiple operators on same field", () => {
-    it("should combine operators with AND logic", () => {
-      const filters: QueryFilters<User> = {
-        where: { age: { GTE: 18, LTE: 65 } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-
-    it("should handle three operators on same field", () => {
-      const filters: QueryFilters<User> = {
-        where: { age: { GT: 0, GTE: 1, LTE: 100 } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("multiple fields", () => {
-    it("should combine multiple field conditions with AND logic", () => {
-      const filters: QueryFilters<User> = {
-        where: {
-          name: { Contains: "john" },
-          status: { Is: "active" },
-        },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-
-    it("should handle three field conditions", () => {
-      const filters: QueryFilters<User> = {
-        where: {
-          age: { GTE: 18 },
-          name: { Contains: "john" },
-          status: { Is: "active" },
-        },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("OneOf (OR logic)", () => {
-    it("should create OR condition with two groups", () => {
-      const filters: QueryFilters<User> = {
-        where: {
-          OneOf: [{ status: { Is: "active" } }, { role: { Is: "admin" } }],
-        },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-
-    it("should create OR condition with three groups", () => {
-      const filters: QueryFilters<User> = {
-        where: {
-          OneOf: [{ status: { Is: "active" } }, { role: { Is: "admin" } }, { age: { GTE: 21 } }],
-        },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-
-    it("should combine OneOf with other conditions using AND", () => {
-      const filters: QueryFilters<User> = {
-        where: {
-          name: { Contains: "john" },
-          OneOf: [{ status: { Is: "active" } }, { role: { Is: "admin" } }],
-        },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-
-    it("should handle empty OneOf array", () => {
-      const filters: QueryFilters<User> = {
-        where: {
-          OneOf: [],
-        },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-
-    it("should handle nested conditions within OneOf groups", () => {
-      const filters: QueryFilters<User> = {
-        where: {
-          OneOf: [{ name: { Contains: "admin" }, status: { Is: "active" } }, { role: { Is: "superadmin" } }],
-        },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("null and undefined value handling", () => {
-    it("should skip field when value is null (except IsNull/IsNotNull)", () => {
-      const filters: QueryFilters<User> = {
-        where: { name: { Is: null as unknown as string } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-
-    it("should skip field when value is undefined", () => {
-      const filters: QueryFilters<User> = {
-        where: { name: { Is: undefined as unknown as string } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-
-    it("should skip field when condition object is falsy", () => {
-      const filters: QueryFilters<User> = {
-        where: { name: undefined },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("getColumn integration", () => {
-    it("should call getColumn with correct field name", () => {
-      const spyGetColumn = vi.fn(mockGetColumn);
-      const filters: QueryFilters<User> = {
-        where: { name: { Is: "john" } },
-      };
-
-      buildDrizzleFilters(filters, spyGetColumn);
-
-      expect(spyGetColumn).toHaveBeenCalledWith("name");
-    });
-
-    it("should call getColumn for each field in where clause", () => {
-      const spyGetColumn = vi.fn(mockGetColumn);
-      const filters: QueryFilters<User> = {
-        where: {
-          age: { GTE: 18 },
-          name: { Contains: "john" },
-          status: { Is: "active" },
-        },
-      };
-
-      buildDrizzleFilters(filters, spyGetColumn);
-
-      expect(spyGetColumn).toHaveBeenCalledWith("name");
-      expect(spyGetColumn).toHaveBeenCalledWith("age");
-      expect(spyGetColumn).toHaveBeenCalledWith("status");
-    });
-
-    it("should call getColumn for fields within OneOf groups", () => {
-      const spyGetColumn = vi.fn(mockGetColumn);
-      const filters: QueryFilters<User> = {
-        where: {
-          OneOf: [{ status: { Is: "active" } }, { role: { Is: "admin" } }],
-        },
-      };
-
-      buildDrizzleFilters(filters, spyGetColumn);
-
-      expect(spyGetColumn).toHaveBeenCalledWith("status");
-      expect(spyGetColumn).toHaveBeenCalledWith("role");
-    });
-  });
-
-  describe("complex real-world scenarios", () => {
-    it("should handle user search with multiple criteria", () => {
-      const filters: QueryFilters<User> = {
-        where: {
-          age: { GTE: 18, LTE: 65 },
-          email: { IsNotNull: null },
-          name: { Contains: "smith" },
-          status: { In: ["active", "pending"] },
-        },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-
-    it("should handle admin OR premium user query", () => {
-      const filters: QueryFilters<User> = {
-        where: {
-          OneOf: [{ role: { Is: "admin" } }, { role: { Is: "premium" } }],
-          status: { Is: "active" },
-        },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-
-    it("should handle email domain search", () => {
-      const filters: QueryFilters<User> = {
-        where: {
-          email: { EndsWith: "@company.com" },
-          status: { IsNot: "banned" },
-        },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-
-    it("should handle age range with exclusions", () => {
-      const filters: QueryFilters<User> = {
-        where: {
-          age: { GTE: 13, LT: 100 },
-          status: { NotIn: ["banned", "deleted", "suspended"] },
-        },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result.where).toBeDefined();
-    });
-  });
-
-  describe("return structure", () => {
-    it("should return object with where property", () => {
-      const filters: QueryFilters<User> = {
-        where: { name: { Is: "test" } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      expect(result).toHaveProperty("where");
-      expect(typeof result.where).toBe("object");
-    });
-
-    it("should return SQL type for where clause", () => {
-      const filters: QueryFilters<User> = {
-        where: { name: { Is: "test" } },
-      };
-      const result = buildDrizzleFilters(filters, mockGetColumn);
-
-      // SQL objects from drizzle-orm have specific properties
-      expect(result.where).toBeDefined();
-      expect(result.where).not.toBeNull();
-    });
+  it("returns neutral parts for empty filters", () => {
+    expect(buildDrizzleFilters<User>({}, users)).toEqual({ limit: undefined, offset: undefined, orderBy: [], select: undefined, where: undefined });
   });
 });

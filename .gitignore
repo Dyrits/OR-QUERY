@@ -1,3 +1,4 @@
 node_modules
 dist
 .npmrc
+packages/datasources/test/prisma/generated

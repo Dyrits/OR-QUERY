@@ -1,13 +1,18 @@
 {
   "author": "",
   "dependencies": {
-    "@ormx/filters": "^0.1.1"
+    "@ormx/filters": "workspace:^"
   },
-  "description": "Datasource utilities for ORMX",
+  "description": "Unified datasource abstraction for Drizzle, Prisma and Supabase with transaction support",
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@prisma/client": "^7.10.0",
     "@supabase/supabase-js": "^2.49.4",
     "drizzle-orm": "^0.45.1",
-    "typescript": "^5.7.0"
+    "pglite-prisma-adapter": "^0.7.2",
+    "prisma": "^7.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^5.0.0"
   },
   "exports": {
     ".": {
@@ -22,6 +27,10 @@
   "keywords": [
     "ormx",
     "datasource",
+    "repository",
+    "drizzle",
+    "prisma",
+    "supabase",
     "database",
     "orm"
   ],
@@ -30,11 +39,11 @@
   "module": "./dist/index.js",
   "name": "@ormx/datasources",
   "peerDependencies": {
-    "@supabase/supabase-js": "",
-    "drizzle-orm": ""
+    "@prisma/client": ">=6.2.0",
+    "drizzle-orm": ">=0.30.0"
   },
   "peerDependenciesMeta": {
-    "@supabase/supabase-js": {
+    "@prisma/client": {
       "optional": true
     },
     "drizzle-orm": {
@@ -45,14 +54,19 @@
     "access": "public"
   },
   "repository": {
+    "directory": "packages/datasources",
     "type": "git",
-    "url": "https://github.com/Dyrits/OR-QUERY.git"
+    "url": "https://github.com/Dyrits/ORMX.git"
   },
   "scripts": {
-    "build": "tsc",
-    "prepublishOnly": "npm run build"
+    "build": "tsc -p tsconfig.build.json",
+    "generate": "prisma generate",
+    "prepublishOnly": "bun run build",
+    "test": "bun run generate && vitest run",
+    "test:watch": "vitest",
+    "typecheck": "bun run generate && tsc --noEmit"
   },
   "type": "module",
   "types": "./dist/index.d.ts",
-  "version": "0.1.2"
+  "version": "0.2.0"
 }

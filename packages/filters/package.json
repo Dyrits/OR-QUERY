@@ -2,9 +2,10 @@
   "author": "",
   "description": "Unified query filtering across Prisma, Drizzle, and Supabase",
   "devDependencies": {
+    "@supabase/supabase-js": "^2.49.4",
     "drizzle-orm": "^0.45.1",
     "typescript": "^5.7.0",
-    "vitest": "^4.0.15"
+    "vitest": "^5.0.0"
   },
   "exports": {
     ".": {
@@ -12,64 +13,16 @@
       "types": "./dist/index.d.ts"
     },
     "./drizzle": {
-      "import": "./dist/build-drizzle.js",
-      "types": "./dist/build-drizzle.d.ts"
-    },
-    "./order": {
-      "import": "./dist/order/index.js",
-      "types": "./dist/order/index.d.ts"
-    },
-    "./order/drizzle": {
-      "import": "./dist/order/build-drizzle.js",
-      "types": "./dist/order/build-drizzle.d.ts"
-    },
-    "./order/prisma": {
-      "import": "./dist/order/build-prisma.js",
-      "types": "./dist/order/build-prisma.d.ts"
-    },
-    "./order/supabase": {
-      "import": "./dist/order/build-supabase.js",
-      "types": "./dist/order/build-supabase.d.ts"
+      "import": "./dist/drizzle/index.js",
+      "types": "./dist/drizzle/index.d.ts"
     },
     "./prisma": {
-      "import": "./dist/build-prisma.js",
-      "types": "./dist/build-prisma.d.ts"
-    },
-    "./select": {
-      "import": "./dist/select/index.js",
-      "types": "./dist/select/index.d.ts"
-    },
-    "./select/drizzle": {
-      "import": "./dist/select/build-drizzle.js",
-      "types": "./dist/select/build-drizzle.d.ts"
-    },
-    "./select/prisma": {
-      "import": "./dist/select/build-prisma.js",
-      "types": "./dist/select/build-prisma.d.ts"
-    },
-    "./select/supabase": {
-      "import": "./dist/select/build-supabase.js",
-      "types": "./dist/select/build-supabase.d.ts"
+      "import": "./dist/prisma/index.js",
+      "types": "./dist/prisma/index.d.ts"
     },
     "./supabase": {
-      "import": "./dist/build-supabase.js",
-      "types": "./dist/build-supabase.d.ts"
-    },
-    "./where": {
-      "import": "./dist/where/index.js",
-      "types": "./dist/where/index.d.ts"
-    },
-    "./where/drizzle": {
-      "import": "./dist/where/build-drizzle.js",
-      "types": "./dist/where/build-drizzle.d.ts"
-    },
-    "./where/prisma": {
-      "import": "./dist/where/build-prisma.js",
-      "types": "./dist/where/build-prisma.d.ts"
-    },
-    "./where/supabase": {
-      "import": "./dist/where/build-supabase.js",
-      "types": "./dist/where/build-supabase.d.ts"
+      "import": "./dist/supabase/index.js",
+      "types": "./dist/supabase/index.d.ts"
     }
   },
   "files": [
@@ -91,7 +44,7 @@
   "module": "./dist/index.js",
   "name": "@ormx/filters",
   "peerDependencies": {
-    "drizzle-orm": ""
+    "drizzle-orm": ">=0.30.0"
   },
   "peerDependenciesMeta": {
     "drizzle-orm": {
@@ -102,16 +55,18 @@
     "access": "public"
   },
   "repository": {
+    "directory": "packages/filters",
     "type": "git",
     "url": "https://github.com/Dyrits/ORMX.git"
   },
   "scripts": {
-    "build": "tsc",
-    "prepublishOnly": "npm run build",
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "bun run build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "type": "module",
   "types": "./dist/index.d.ts",
-  "version": "0.1.6"
+  "version": "0.2.0"
 }

@@ -1,307 +1,161 @@
 import { describe, expect, it } from "vitest";
-import { buildPrismaFilters } from "./build-prisma";
+import { buildPrismaFilters, buildPrismaOrder, buildPrismaSelect, buildPrismaWhere } from "./prisma";
 import type { QueryFilters } from "./types";
-import { buildPrismaWhere } from "./where/build-prisma";
 
-interface User {
+type Post = {
+  id: number;
+  title: string;
+  published: boolean;
+};
+
+type User = {
   id: number;
   name: string;
-  email: string;
+  email: string | null;
   age: number;
   status: string;
   role: string;
   createdAt: Date;
-}
+  posts: Post[];
+};
 
 describe("buildPrismaWhere", () => {
-  describe("empty and undefined filters", () => {
-    it("should return empty object when where is undefined", () => {
-      const result = buildPrismaWhere<User>(undefined);
-      expect(result).toEqual({});
-    });
+  it("returns an empty object for undefined or empty input", () => {
+    expect(buildPrismaWhere<User>(undefined)).toEqual({});
+    expect(buildPrismaWhere<User>({})).toEqual({});
+  });
 
-    it("should return empty object when where is empty", () => {
-      const result = buildPrismaWhere<User>({});
-      expect(result).toEqual({});
+  it.each([
+    ["Is", { name: { Is: "john" } }, { name: { equals: "john" } }],
+    ["IsNot", { status: { IsNot: "inactive" } }, { status: { not: "inactive" } }],
+    ["GT", { age: { GT: 18 } }, { age: { gt: 18 } }],
+    ["GTE", { age: { GTE: 21 } }, { age: { gte: 21 } }],
+    ["LT", { age: { LT: 65 } }, { age: { lt: 65 } }],
+    ["LTE", { age: { LTE: 100 } }, { age: { lte: 100 } }],
+    ["In", { status: { In: ["active", "pending"] } }, { status: { in: ["active", "pending"] } }],
+    ["NotIn", { id: { NotIn: [1, 2] } }, { id: { notIn: [1, 2] } }],
+    ["Contains", { name: { Contains: "john" } }, { name: { contains: "john", mode: "insensitive" } }],
+    ["StartsWith", { email: { StartsWith: "admin" } }, { email: { mode: "insensitive", startsWith: "admin" } }],
+    ["EndsWith", { email: { EndsWith: "@example.com" } }, { email: { endsWith: "@example.com", mode: "insensitive" } }],
+    ["IsNull", { email: { IsNull: true } }, { email: { equals: null } }],
+    ["IsNotNull", { email: { IsNotNull: true } }, { email: { not: null } }],
+  ] as const)("maps %s", (_operator, where, expected) => {
+    expect(buildPrismaWhere<User>(where)).toEqual(expected);
+  });
+
+  it("supports case-sensitive text matching when requested", () => {
+    expect(buildPrismaWhere<User>({ name: { Contains: "john" } }, { caseInsensitive: false })).toEqual({ name: { contains: "john" } });
+  });
+
+  it("ignores IsNull and IsNotNull when set to false", () => {
+    expect(buildPrismaWhere<User>({ email: { IsNotNull: false, IsNull: false } })).toEqual({});
+  });
+
+  it("combines operators on the same field", () => {
+    expect(buildPrismaWhere<User>({ age: { GTE: 18, LTE: 65 } })).toEqual({ age: { gte: 18, lte: 65 } });
+  });
+
+  it("combines multiple fields", () => {
+    expect(buildPrismaWhere<User>({ name: { Contains: "john" }, status: { Is: "active" } })).toEqual({
+      name: { contains: "john", mode: "insensitive" },
+      status: { equals: "active" },
     });
   });
 
-  describe("Is operator", () => {
-    it("should create equals condition", () => {
-      const result = buildPrismaWhere<User>({ name: { Is: "john" } });
-      expect(result).toEqual({ name: { equals: "john" } });
-    });
+  it("skips undefined conditions and blank values", () => {
+    expect(buildPrismaWhere<User>({ name: undefined, status: { Is: undefined } })).toEqual({});
+  });
 
-    it("should handle numeric Is condition", () => {
-      const result = buildPrismaWhere<User>({ age: { Is: 25 } });
-      expect(result).toEqual({ age: { equals: 25 } });
+  it("keeps falsy values such as 0 and false", () => {
+    expect(buildPrismaWhere<User>({ age: { Is: 0 } })).toEqual({ age: { equals: 0 } });
+  });
+
+  it("maps OneOf to OR", () => {
+    expect(buildPrismaWhere<User>({ age: { GTE: 18 }, OneOf: [{ status: { Is: "active" } }, { role: { Is: "admin" } }] })).toEqual({
+      age: { gte: 18 },
+      OR: [{ status: { equals: "active" } }, { role: { equals: "admin" } }],
     });
   });
 
-  describe("IsNot operator", () => {
-    it("should create not condition", () => {
-      const result = buildPrismaWhere<User>({ status: { IsNot: "inactive" } });
-      expect(result).toEqual({ status: { not: "inactive" } });
+  it("supports nested OneOf groups", () => {
+    expect(buildPrismaWhere<User>({ OneOf: [{ name: { Is: "a" }, OneOf: [{ age: { Is: 1 } }, { age: { Is: 2 } }] }, { role: { Is: "admin" } }] })).toEqual({
+      OR: [{ name: { equals: "a" }, OR: [{ age: { equals: 1 } }, { age: { equals: 2 } }] }, { role: { equals: "admin" } }],
     });
   });
 
-  describe("GT operator", () => {
-    it("should create greater than condition", () => {
-      const result = buildPrismaWhere<User>({ age: { GT: 18 } });
-      expect(result).toEqual({ age: { gt: 18 } });
+  it("ignores an empty OneOf", () => {
+    expect(buildPrismaWhere<User>({ OneOf: [] })).toEqual({});
+  });
+});
+
+describe("buildPrismaOrder", () => {
+  it("returns undefined when there is nothing to sort", () => {
+    expect(buildPrismaOrder<User>(undefined)).toBeUndefined();
+    expect(buildPrismaOrder<User>({})).toBeUndefined();
+    expect(buildPrismaOrder<User>({ name: undefined })).toBeUndefined();
+  });
+
+  it("preserves sort priority as an array", () => {
+    expect(buildPrismaOrder<User>({ age: "desc", name: "asc" })).toEqual([{ age: "desc" }, { name: "asc" }]);
+  });
+});
+
+describe("buildPrismaSelect", () => {
+  it("returns undefined when nothing is selected", () => {
+    expect(buildPrismaSelect<User>(undefined)).toBeUndefined();
+    expect(buildPrismaSelect<User>({})).toBeUndefined();
+    expect(buildPrismaSelect<User>({ id: false })).toBeUndefined();
+  });
+
+  it("maps scalar fields", () => {
+    expect(buildPrismaSelect<User>({ id: true, name: true })).toEqual({ id: true, name: true });
+  });
+
+  it("maps relations with nested filters", () => {
+    expect(
+      buildPrismaSelect<User>({
+        id: true,
+        posts: { limit: 5, order: { id: "desc" }, select: { title: true }, where: { published: { Is: true } } },
+      }),
+    ).toEqual({
+      id: true,
+      posts: { orderBy: [{ id: "desc" }], select: { title: true }, take: 5, where: { published: { equals: true } } },
     });
   });
 
-  describe("GTE operator", () => {
-    it("should create greater than or equal condition", () => {
-      const result = buildPrismaWhere<User>({ age: { GTE: 21 } });
-      expect(result).toEqual({ age: { gte: 21 } });
-    });
-  });
-
-  describe("LT operator", () => {
-    it("should create less than condition", () => {
-      const result = buildPrismaWhere<User>({ age: { LT: 65 } });
-      expect(result).toEqual({ age: { lt: 65 } });
-    });
-  });
-
-  describe("LTE operator", () => {
-    it("should create less than or equal condition", () => {
-      const result = buildPrismaWhere<User>({ age: { LTE: 100 } });
-      expect(result).toEqual({ age: { lte: 100 } });
-    });
-  });
-
-  describe("In operator", () => {
-    it("should create in array condition", () => {
-      const result = buildPrismaWhere<User>({ status: { In: ["active", "pending"] } });
-      expect(result).toEqual({ status: { in: ["active", "pending"] } });
-    });
-
-    it("should handle numeric array", () => {
-      const result = buildPrismaWhere<User>({ id: { In: [1, 2, 3] } });
-      expect(result).toEqual({ id: { in: [1, 2, 3] } });
-    });
-  });
-
-  describe("NotIn operator", () => {
-    it("should create notIn condition", () => {
-      const result = buildPrismaWhere<User>({ status: { NotIn: ["banned", "deleted"] } });
-      expect(result).toEqual({ status: { notIn: ["banned", "deleted"] } });
-    });
-  });
-
-  describe("Contains operator", () => {
-    it("should create contains condition", () => {
-      const result = buildPrismaWhere<User>({ name: { Contains: "john" } });
-      expect(result).toEqual({ name: { contains: "john" } });
-    });
-  });
-
-  describe("StartsWith operator", () => {
-    it("should create startsWith condition", () => {
-      const result = buildPrismaWhere<User>({ email: { StartsWith: "admin" } });
-      expect(result).toEqual({ email: { startsWith: "admin" } });
-    });
-  });
-
-  describe("EndsWith operator", () => {
-    it("should create endsWith condition", () => {
-      const result = buildPrismaWhere<User>({ email: { EndsWith: "@example.com" } });
-      expect(result).toEqual({ email: { endsWith: "@example.com" } });
-    });
-  });
-
-  describe("IsNull operator", () => {
-    it("should create equals null condition", () => {
-      const result = buildPrismaWhere<User>({ email: { IsNull: null } });
-      expect(result).toEqual({ email: { equals: null } });
-    });
-  });
-
-  describe("IsNotNull operator", () => {
-    it("should create not null condition", () => {
-      const result = buildPrismaWhere<User>({ email: { IsNotNull: null } });
-      expect(result).toEqual({ email: { not: null } });
-    });
-  });
-
-  describe("multiple operators on same field", () => {
-    it("should combine operators", () => {
-      const result = buildPrismaWhere<User>({ age: { GTE: 18, LTE: 65 } });
-      expect(result).toEqual({ age: { gte: 18, lte: 65 } });
-    });
-
-    it("should handle three operators on same field", () => {
-      const result = buildPrismaWhere<User>({ age: { GT: 0, GTE: 1, LTE: 100 } });
-      expect(result).toEqual({ age: { gt: 0, gte: 1, lte: 100 } });
-    });
-  });
-
-  describe("multiple fields", () => {
-    it("should combine multiple field conditions", () => {
-      const result = buildPrismaWhere<User>({
-        name: { Contains: "john" },
-        status: { Is: "active" },
-      });
-      expect(result).toEqual({
-        name: { contains: "john" },
-        status: { equals: "active" },
-      });
-    });
-
-    it("should handle three field conditions", () => {
-      const result = buildPrismaWhere<User>({
-        age: { GTE: 18 },
-        name: { Contains: "john" },
-        status: { Is: "active" },
-      });
-      expect(result).toEqual({
-        age: { gte: 18 },
-        name: { contains: "john" },
-        status: { equals: "active" },
-      });
-    });
-  });
-
-  describe("OneOf (OR logic)", () => {
-    it("should create OR condition with two groups", () => {
-      const result = buildPrismaWhere<User>({
-        OneOf: [{ status: { Is: "active" } }, { role: { Is: "admin" } }],
-      });
-      expect(result).toEqual({
-        OR: [{ status: { equals: "active" } }, { role: { equals: "admin" } }],
-      });
-    });
-
-    it("should create OR condition with three groups", () => {
-      const result = buildPrismaWhere<User>({
-        OneOf: [{ status: { Is: "active" } }, { role: { Is: "admin" } }, { age: { GTE: 21 } }],
-      });
-      expect(result).toEqual({
-        OR: [{ status: { equals: "active" } }, { role: { equals: "admin" } }, { age: { gte: 21 } }],
-      });
-    });
-
-    it("should combine OneOf with other conditions", () => {
-      const result = buildPrismaWhere<User>({
-        name: { Contains: "john" },
-        OneOf: [{ status: { Is: "active" } }, { role: { Is: "admin" } }],
-      });
-      expect(result).toEqual({
-        name: { contains: "john" },
-        OR: [{ status: { equals: "active" } }, { role: { equals: "admin" } }],
-      });
-    });
-
-    it("should handle empty OneOf array", () => {
-      const result = buildPrismaWhere<User>({
-        OneOf: [],
-      });
-      expect(result).toEqual({});
-    });
-
-    it("should handle nested conditions within OneOf groups", () => {
-      const result = buildPrismaWhere<User>({
-        OneOf: [{ name: { Contains: "admin" }, status: { Is: "active" } }, { role: { Is: "superadmin" } }],
-      });
-      expect(result).toEqual({
-        OR: [{ name: { contains: "admin" }, status: { equals: "active" } }, { role: { equals: "superadmin" } }],
-      });
-    });
-  });
-
-  describe("null and undefined value handling", () => {
-    it("should skip field when condition is undefined", () => {
-      const result = buildPrismaWhere<User>({ name: undefined });
-      expect(result).toEqual({});
-    });
-  });
-
-  describe("complex real-world scenarios", () => {
-    it("should handle user search with multiple criteria", () => {
-      const result = buildPrismaWhere<User>({
-        age: { GTE: 18, LTE: 65 },
-        email: { IsNotNull: null },
-        name: { Contains: "smith" },
-        status: { In: ["active", "pending"] },
-      });
-      expect(result).toEqual({
-        age: { gte: 18, lte: 65 },
-        email: { not: null },
-        name: { contains: "smith" },
-        status: { in: ["active", "pending"] },
-      });
-    });
-
-    it("should handle admin OR premium user query", () => {
-      const result = buildPrismaWhere<User>({
-        OneOf: [{ role: { Is: "admin" } }, { role: { Is: "premium" } }],
-        status: { Is: "active" },
-      });
-      expect(result).toEqual({
-        OR: [{ role: { equals: "admin" } }, { role: { equals: "premium" } }],
-        status: { equals: "active" },
-      });
-    });
-
-    it("should handle email domain search", () => {
-      const result = buildPrismaWhere<User>({
-        email: { EndsWith: "@company.com" },
-        status: { IsNot: "banned" },
-      });
-      expect(result).toEqual({
-        email: { endsWith: "@company.com" },
-        status: { not: "banned" },
-      });
-    });
-
-    it("should handle age range with exclusions", () => {
-      const result = buildPrismaWhere<User>({
-        age: { GTE: 13, LT: 100 },
-        status: { NotIn: ["banned", "deleted", "suspended"] },
-      });
-      expect(result).toEqual({
-        age: { gte: 13, lt: 100 },
-        status: { notIn: ["banned", "deleted", "suspended"] },
-      });
-    });
+  it("maps relations without nested filters to true", () => {
+    expect(buildPrismaSelect<User>({ posts: {} })).toEqual({ posts: true });
+    expect(buildPrismaSelect<User>({ posts: true })).toEqual({ posts: true });
   });
 });
 
 describe("buildPrismaFilters", () => {
-  it("should return object with where property", () => {
-    const filters: QueryFilters<User> = {
-      where: { name: { Is: "test" } },
-    };
-    const result = buildPrismaFilters(filters);
-
-    expect(result).toHaveProperty("where");
-    expect(result.where).toEqual({ name: { equals: "test" } });
+  it("returns an empty object for empty filters", () => {
+    expect(buildPrismaFilters<User>({})).toEqual({});
+    expect(buildPrismaFilters<User>({ order: {}, select: {}, where: {} })).toEqual({});
   });
 
-  it("should handle empty filters", () => {
-    const filters: QueryFilters<User> = {};
-    const result = buildPrismaFilters(filters);
-
-    expect(result.where).toEqual({});
-  });
-
-  it("should handle complex filters", () => {
+  it("maps every clause", () => {
     const filters: QueryFilters<User> = {
-      where: {
-        age: { GTE: 18 },
-        OneOf: [{ role: { Is: "admin" } }, { role: { Is: "moderator" } }],
-        status: { Is: "active" },
-      },
+      limit: 10,
+      offset: 20,
+      order: { createdAt: "desc" },
+      select: { id: true, name: true },
+      where: { age: { GTE: 18 }, OneOf: [{ role: { Is: "admin" } }, { role: { Is: "moderator" } }] },
     };
-    const result = buildPrismaFilters(filters);
 
-    expect(result.where).toEqual({
-      age: { gte: 18 },
-      OR: [{ role: { equals: "admin" } }, { role: { equals: "moderator" } }],
-      status: { equals: "active" },
+    expect(buildPrismaFilters(filters)).toEqual({
+      orderBy: [{ createdAt: "desc" }],
+      select: { id: true, name: true },
+      skip: 20,
+      take: 10,
+      where: { age: { gte: 18 }, OR: [{ role: { equals: "admin" } }, { role: { equals: "moderator" } }] },
     });
+  });
+
+  it("forwards options to nested selections", () => {
+    const filters: QueryFilters<User> = { select: { posts: { where: { title: { Contains: "x" } } } } };
+
+    expect(buildPrismaFilters(filters, { caseInsensitive: false })).toEqual({ select: { posts: { where: { title: { contains: "x" } } } } });
   });
 });

@@ -1,16 +1,17 @@
-import type { ExtractTablesWithRelations } from "drizzle-orm";
 import type { PgQueryResultHKT, PgTransaction } from "drizzle-orm/pg-core";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import type { DrizzleDatabase } from "./drizzle.datasource";
 import type ITransactor from "./transactor.interface";
 
-export type DrizzleTransaction = PgTransaction<PgQueryResultHKT, Record<string, never>, ExtractTablesWithRelations<Record<string, never>>>;
+/**
+ * Any Drizzle PostgreSQL transaction, whatever its driver and schema.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: the schema type parameters must stay open to accept any transaction.
+export type DrizzleTransaction = PgTransaction<PgQueryResultHKT, any, any>;
 
 export default class DrizzleTransactor implements ITransactor<DrizzleTransaction> {
-  constructor(private readonly database: PostgresJsDatabase) {}
+  constructor(private readonly database: DrizzleDatabase) {}
 
-  async transact<TResult>(callback: (transaction: DrizzleTransaction) => Promise<TResult>): Promise<TResult> {
-    return this.database.transaction(async ($transaction) => {
-      return callback($transaction);
-    }) as Promise<TResult>;
+  transact<TResult>(callback: (transaction: DrizzleTransaction) => Promise<TResult>): Promise<TResult> {
+    return this.database.transaction((transaction) => callback(transaction));
   }
 }

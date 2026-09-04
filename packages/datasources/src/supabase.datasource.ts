@@ -1,91 +1,101 @@
 import type { QueryFilters } from "@ormx/filters";
-import { buildSupabaseWhere, type SupabaseFilterBuilder } from "@ormx/filters/where/supabase";
+import { buildSupabaseFilters, buildSupabaseSelect, buildSupabaseWhere, type SupabaseQuery } from "@ormx/filters/supabase";
 import type IDatasource from "./datasource.interface";
+import { assertFiltered } from "./guards";
+
+export type SupabaseResponse<TData> = PromiseLike<{ data: TData; error: unknown }>;
 
 /**
- * Minimal Supabase client interface for datasource operations.
- * Compatible with `@supabase/supabase-js` SupabaseClient.
+ * Structural subset of `PostgrestQueryBuilder` used by the datasource.
  */
-export interface SupabaseClientLike {
-  from(table: string): SupabaseFilterBuilder<Record<string, unknown>> & {
-    insert(data: unknown): { select(): { single(): PromiseLike<{ data: unknown; error: unknown }> } };
-    update(data: unknown): SupabaseFilterBuilder<Record<string, unknown>> & {
-      select(): { single(): PromiseLike<{ data: unknown; error: unknown }> };
-    };
-    delete(): SupabaseFilterBuilder<Record<string, unknown>> & PromiseLike<{ error: unknown }>;
-    select(): SupabaseFilterBuilder<Record<string, unknown>> & {
-      limit(count: number): { single(): PromiseLike<{ data: unknown; error: unknown }> };
-    } & PromiseLike<{ data: unknown[]; error: unknown }>;
-  };
+export interface SupabaseTable {
+  select(columns?: string): SupabaseQuery & SupabaseResponse<unknown[] | null>;
+  insert(values: unknown): { select(columns?: string): { single(): SupabaseResponse<unknown> } };
+  update(values: unknown): SupabaseQuery & { select(columns?: string): SupabaseResponse<unknown[] | null> };
+  delete(): SupabaseQuery & SupabaseResponse<unknown>;
 }
 
-export default class SupabaseDatasource<TSelect, TInsert extends Record<string, unknown>> implements IDatasource<TSelect, TInsert, SupabaseClientLike> {
+/**
+ * Structural subset of `SupabaseClient` used by the datasource.
+ * The query builder returned by `from` is deliberately left untyped here, because comparing an untyped `SupabaseClient` against `SupabaseTable` exceeds TypeScript's instantiation depth.
+ */
+export interface SupabaseClientLike {
+  from: (table: string) => object;
+}
+
+/**
+ * Error thrown when a Supabase request fails. The original PostgREST error is available as `cause`.
+ */
+export class SupabaseDatasourceError extends Error {
+  constructor(cause: unknown) {
+    const message = typeof cause === "object" && cause !== null && "message" in cause ? String(cause.message) : "Supabase request failed.";
+    super(`[@ormx/datasources] ${message}`, { cause });
+    this.name = "SupabaseDatasourceError";
+  }
+}
+
+/**
+ * Datasource backed by a Supabase table.
+ * Supabase has no client-side transactions, so `withTransaction` always throws.
+ */
+export default class SupabaseDatasource<TSelect, TInsert extends object = Partial<TSelect>> implements IDatasource<TSelect, TInsert, never> {
   constructor(
     private readonly client: SupabaseClientLike,
     private readonly table: string,
   ) {}
 
-  withTransaction(_$transaction: SupabaseClientLike): never {
-    throw new Error("SupabaseDatasource does not support transactions.Use DrizzleDatasource with your Supabase Postgres connection URL instead.");
+  withTransaction(): never {
+    throw new Error(
+      "[@ormx/datasources] Supabase does not support transactions. Use DrizzleDatasource or PrismaDatasource on your Supabase Postgres connection string instead.",
+    );
+  }
+
+  private builder(): SupabaseTable {
+    return this.client.from(this.table) as SupabaseTable;
+  }
+
+  private unwrap<TData>(response: { data: TData; error: unknown }): TData {
+    if (response.error) {
+      throw response.error instanceof Error ? response.error : new SupabaseDatasourceError(response.error);
+    }
+
+    return response.data;
   }
 
   async store(payload: TInsert): Promise<TSelect> {
-    const { data, error } = await this.client.from(this.table).insert(payload).select().single();
+    const response = await this.builder().insert(payload).select().single();
 
-    if (error) {
-      throw error;
-    }
-
-    return data as TSelect;
+    return this.unwrap(response) as TSelect;
   }
 
-  async lookup(filters: QueryFilters<TSelect>): Promise<TSelect> {
-    const query = this.client.from(this.table).select();
-    const filtered = buildSupabaseWhere(query as SupabaseFilterBuilder<TSelect>, filters.where);
+  async lookup(filters: QueryFilters<TSelect> = {}): Promise<TSelect | null> {
+    const [row] = await this.list({ ...filters, limit: 1 });
 
-    const { data, error } = await (filtered as typeof query).limit(1).single();
-
-    if (error) {
-      throw error;
-    }
-
-    return data as TSelect;
+    return row ?? null;
   }
 
-  async list(filters: QueryFilters<TSelect>): Promise<TSelect[]> {
-    const query = this.client.from(this.table).select();
-    const filtered = buildSupabaseWhere(query as SupabaseFilterBuilder<TSelect>, filters.where);
+  async list(filters: QueryFilters<TSelect> = {}): Promise<TSelect[]> {
+    const query = this.builder().select(buildSupabaseSelect(filters.select));
+    const response = await buildSupabaseFilters(query, filters);
 
-    const { data, error } = await (filtered as typeof query);
-
-    if (error) {
-      throw error;
-    }
-
-    return (data ?? []) as TSelect[];
+    return (this.unwrap(response) ?? []) as TSelect[];
   }
 
-  async modify(filters: QueryFilters<TSelect>, payload: Partial<TInsert>): Promise<TSelect> {
-    const query = this.client.from(this.table).update(payload);
-    const filtered = buildSupabaseWhere(query as SupabaseFilterBuilder<TSelect>, filters.where);
+  async modify(filters: QueryFilters<TSelect>, payload: Partial<TInsert>): Promise<TSelect | null> {
+    assertFiltered(filters, "modify");
 
-    const { data, error } = await (filtered as typeof query).select().single();
+    const query = buildSupabaseWhere(this.builder().update(payload), filters.where);
+    const response = await query.select(buildSupabaseSelect(filters.select));
+    const rows = (this.unwrap(response) ?? []) as TSelect[];
 
-    if (error) {
-      throw error;
-    }
-
-    return data as TSelect;
+    return rows[0] ?? null;
   }
 
   async destroy(filters: QueryFilters<TSelect>): Promise<void> {
-    const query = this.client.from(this.table).delete();
-    const filtered = buildSupabaseWhere(query as SupabaseFilterBuilder<TSelect>, filters.where);
+    assertFiltered(filters, "destroy");
 
-    const { error } = await (filtered as typeof query);
+    const response = await buildSupabaseWhere(this.builder().delete(), filters.where);
 
-    if (error) {
-      throw error;
-    }
+    this.unwrap(response);
   }
 }
