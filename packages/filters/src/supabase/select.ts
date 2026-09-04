@@ -1,5 +1,5 @@
-import { isNestedSelect } from "../shared";
-import type { QueryFilters, Select } from "../types";
+import { isNestedSelect } from "../shared.js";
+import type { QueryFilters, Select } from "../types.js";
 
 /**
  * Converts a generic Select clause into a PostgREST columns string, as expected by `.select()`.

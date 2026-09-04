@@ -1,18 +1,19 @@
 import type { QueryFilters } from "@ormx/filters";
-import { buildSupabaseFilters, buildSupabaseSelect, buildSupabaseWhere, type SupabaseQuery } from "@ormx/filters/supabase";
-import type IDatasource from "./datasource.interface";
-import { assertFiltered } from "./guards";
+import { buildSupabaseFilters, buildSupabaseSelect, buildSupabaseWhere, buildSupabaseWhereString, type SupabaseQuery } from "@ormx/filters/supabase";
+import type IDatasource from "./datasource.interface.js";
+import type { WriteFilters } from "./datasource.interface.js";
+import { assertFiltered, first } from "./guards.js";
 
-export type SupabaseResponse<TData> = PromiseLike<{ data: TData; error: unknown }>;
+type Response<TData> = PromiseLike<{ data: TData; error: unknown }>;
 
 /**
  * Structural subset of `PostgrestQueryBuilder` used by the datasource.
  */
-export interface SupabaseTable {
-  select(columns?: string): SupabaseQuery & SupabaseResponse<unknown[] | null>;
-  insert(values: unknown): { select(columns?: string): { single(): SupabaseResponse<unknown> } };
-  update(values: unknown): SupabaseQuery & { select(columns?: string): SupabaseResponse<unknown[] | null> };
-  delete(): SupabaseQuery & SupabaseResponse<unknown>;
+interface SupabaseTable {
+  select(columns?: string): SupabaseQuery & Response<unknown[] | null>;
+  insert(values: unknown): { select(columns?: string): { single(): Response<unknown> } };
+  update(values: unknown): SupabaseQuery & { select(columns?: string): Response<unknown[] | null> };
+  delete(): SupabaseQuery & Response<unknown>;
 }
 
 /**
@@ -56,7 +57,7 @@ export default class SupabaseDatasource<TSelect, TInsert extends object = Partia
 
   private unwrap<TData>(response: { data: TData; error: unknown }): TData {
     if (response.error) {
-      throw response.error instanceof Error ? response.error : new SupabaseDatasourceError(response.error);
+      throw new SupabaseDatasourceError(response.error);
     }
 
     return response.data;
@@ -69,9 +70,7 @@ export default class SupabaseDatasource<TSelect, TInsert extends object = Partia
   }
 
   async lookup(filters: QueryFilters<TSelect> = {}): Promise<TSelect | null> {
-    const [row] = await this.list({ ...filters, limit: 1 });
-
-    return row ?? null;
+    return first(await this.list({ ...filters, limit: 1 }));
   }
 
   async list(filters: QueryFilters<TSelect> = {}): Promise<TSelect[]> {
@@ -81,21 +80,18 @@ export default class SupabaseDatasource<TSelect, TInsert extends object = Partia
     return (this.unwrap(response) ?? []) as TSelect[];
   }
 
-  async modify(filters: QueryFilters<TSelect>, payload: Partial<TInsert>): Promise<TSelect | null> {
-    assertFiltered(filters, "modify");
+  async modify(filters: WriteFilters<TSelect>, payload: Partial<TInsert>): Promise<TSelect[]> {
+    assertFiltered(buildSupabaseWhereString(filters.where), "modify");
 
     const query = buildSupabaseWhere(this.builder().update(payload), filters.where);
     const response = await query.select(buildSupabaseSelect(filters.select));
-    const rows = (this.unwrap(response) ?? []) as TSelect[];
 
-    return rows[0] ?? null;
+    return (this.unwrap(response) ?? []) as TSelect[];
   }
 
-  async destroy(filters: QueryFilters<TSelect>): Promise<void> {
-    assertFiltered(filters, "destroy");
+  async destroy(filters: WriteFilters<TSelect>): Promise<void> {
+    assertFiltered(buildSupabaseWhereString(filters.where), "destroy");
 
-    const response = await buildSupabaseWhere(this.builder().delete(), filters.where);
-
-    this.unwrap(response);
+    this.unwrap(await buildSupabaseWhere(this.builder().delete(), filters.where));
   }
 }

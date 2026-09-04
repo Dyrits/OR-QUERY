@@ -1,4 +1,4 @@
-export * from "./drizzle";
-export * from "./prisma";
-export * from "./supabase";
-export type { FieldOperators, Operator, Order, OrderDirection, QueryFilters, Scalar, ScalarKeys, ScalarSelect, Select, Unwrap, Where } from "./types";
+export * from "./drizzle/index.js";
+export * from "./prisma/index.js";
+export * from "./supabase/index.js";
+export type { FieldOperators, Operator, Order, OrderDirection, QueryFilters, Scalar, ScalarKeys, ScalarSelect, Select, Unwrap, Where } from "./types.js";

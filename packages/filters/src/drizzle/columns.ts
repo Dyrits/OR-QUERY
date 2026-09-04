@@ -29,10 +29,10 @@ export function resolveColumn<TSource extends ColumnSource>(source: TSource, fie
 
   if (typeof source === "function") {
     column = source(field);
-  } else if (is(source, Table)) {
-    column = (getTableColumns(source) as Record<string, AnyColumn>)[field];
   } else {
-    column = (source as Record<string, AnyColumn>)[field];
+    // Own properties only, so that a field named after a prototype member such as "constructor" is rejected rather than resolved to a function.
+    const columns = (is(source, Table) ? getTableColumns(source) : source) as Record<string, AnyColumn>;
+    column = Object.hasOwn(columns, field) ? columns[field] : undefined;
   }
 
   if (!column) {

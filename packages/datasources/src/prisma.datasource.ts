@@ -1,7 +1,8 @@
 import type { QueryFilters } from "@ormx/filters";
-import { buildPrismaFilters, type PrismaOptions } from "@ormx/filters/prisma";
-import type IDatasource from "./datasource.interface";
-import { assertFiltered } from "./guards";
+import { buildPrismaFilters, buildPrismaSelect, buildPrismaWhere, type PrismaOptions } from "@ormx/filters/prisma";
+import type IDatasource from "./datasource.interface.js";
+import type { WriteFilters } from "./datasource.interface.js";
+import { assertFiltered, first } from "./guards.js";
 
 /**
  * Structural subset of a Prisma model delegate used by the datasource.
@@ -33,12 +34,8 @@ export type InferPrismaInsert<TDelegate> = TDelegate extends { create(args: { da
  * Datasource backed by a Prisma model.
  * Row types are inferred from the client, so `new PrismaDatasource(prisma, "user")` is fully typed.
  */
-export default class PrismaDatasource<
-  TClient extends object,
-  TModel extends PrismaModels<TClient>,
-  TSelect = InferPrismaSelect<TClient[TModel]>,
-  TInsert extends object = InferPrismaInsert<TClient[TModel]>,
-> implements IDatasource<TSelect, TInsert, Pick<TClient, TModel>>
+export default class PrismaDatasource<TClient extends object, TModel extends PrismaModels<TClient>, TSelect = InferPrismaSelect<TClient[TModel]>>
+  implements IDatasource<TSelect, InferPrismaInsert<TClient[TModel]>, Pick<TClient, TModel>>
 {
   constructor(
     private readonly client: TClient,
@@ -56,36 +53,32 @@ export default class PrismaDatasource<
     return delegate as PrismaDelegate;
   }
 
-  withTransaction(transaction: Pick<TClient, TModel>): PrismaDatasource<TClient, TModel, TSelect, TInsert> {
-    return new PrismaDatasource<TClient, TModel, TSelect, TInsert>(transaction as TClient, this.model, this.options);
+  withTransaction(transaction: Pick<TClient, TModel>): PrismaDatasource<TClient, TModel, TSelect> {
+    return new PrismaDatasource<TClient, TModel, TSelect>(transaction as TClient, this.model, this.options);
   }
 
-  async store(payload: TInsert): Promise<TSelect> {
+  async store(payload: InferPrismaInsert<TClient[TModel]>): Promise<TSelect> {
     return (await this.delegate.create({ data: payload })) as TSelect;
   }
 
   async lookup(filters: QueryFilters<TSelect> = {}): Promise<TSelect | null> {
-    const [row] = await this.list({ ...filters, limit: 1 });
-
-    return row ?? null;
+    return first(await this.list({ ...filters, limit: 1 }));
   }
 
   async list(filters: QueryFilters<TSelect> = {}): Promise<TSelect[]> {
     return (await this.delegate.findMany(buildPrismaFilters(filters, this.options))) as TSelect[];
   }
 
-  async modify(filters: QueryFilters<TSelect>, payload: Partial<TInsert>): Promise<TSelect | null> {
-    assertFiltered(filters, "modify");
-    const { select, where } = buildPrismaFilters(filters, this.options);
+  async modify(filters: WriteFilters<TSelect>, payload: Partial<InferPrismaInsert<TClient[TModel]>>): Promise<TSelect[]> {
+    const where = buildPrismaWhere(filters.where, this.options);
+    assertFiltered(where, "modify");
 
-    const [row] = await this.delegate.updateManyAndReturn({ data: payload, select, where });
-
-    return (row as TSelect | undefined) ?? null;
+    return (await this.delegate.updateManyAndReturn({ data: payload, select: buildPrismaSelect(filters.select, this.options), where })) as TSelect[];
   }
 
-  async destroy(filters: QueryFilters<TSelect>): Promise<void> {
-    assertFiltered(filters, "destroy");
-    const { where } = buildPrismaFilters(filters, this.options);
+  async destroy(filters: WriteFilters<TSelect>): Promise<void> {
+    const where = buildPrismaWhere(filters.where, this.options);
+    assertFiltered(where, "destroy");
 
     await this.delegate.deleteMany({ where });
   }

@@ -14,6 +14,14 @@ bun add @ormx/filters
 
 Drizzle support needs `drizzle-orm` installed. Prisma and Supabase support have no extra dependency.
 
+Import from a sub-path to keep the other targets out of your bundle. The root export pulls in all three, so it requires `drizzle-orm` to be installed:
+
+```typescript
+import { buildPrismaFilters } from "@ormx/filters/prisma";
+import { buildDrizzleFilters } from "@ormx/filters/drizzle";
+import { buildSupabaseFilters } from "@ormx/filters/supabase";
+```
+
 ## Usage
 
 ### Define filters using the common format
@@ -49,6 +57,8 @@ const filters: QueryFilters<User> = {
 };
 ```
 
+`where` and `order` accept scalar fields only. Relations are queried through nested filters in `select`, which Prisma and Supabase support.
+
 ### Prisma
 
 ```typescript
@@ -75,12 +85,20 @@ Text operators add `mode: "insensitive"` so they behave like Drizzle and Supabas
 buildPrismaFilters(filters, { caseInsensitive: false });
 ```
 
+Prisma applies `mode` to every operator of a field, not just the text ones. So when a field mixes text and exact operators, the text ones move to a separate `AND` entry to keep `Is`, `IsNot` and `In` case-sensitive:
+
+```typescript
+buildPrismaWhere({ name: { Contains: "OHN", IsNot: "John" } });
+// { name: { not: "John" }, AND: [{ name: { contains: "OHN", mode: "insensitive" } }] }
+```
+
 Individual builders are also available: `buildPrismaWhere`, `buildPrismaSelect`, `buildPrismaOrder`.
 
 ### Drizzle
 
 ```typescript
 import { buildDrizzleFilters } from "@ormx/filters/drizzle";
+import { getTableColumns } from "drizzle-orm";
 import { users } from "./schema";
 
 const { where, select, orderBy, limit, offset } = buildDrizzleFilters(filters, users);
@@ -95,7 +113,9 @@ const rows = await db
 
 The second argument tells the builder where to find columns. It accepts a Drizzle table, a record of columns, or a resolver function `(field) => column`. Unknown fields throw instead of producing broken SQL.
 
-`where` is `undefined` when there is no condition, `select` is `undefined` when every column is selected, and `orderBy` is an empty array when there is no sort. Nested selections on relations are not supported by Drizzle's core query builder and throw.
+`where` is `undefined` when there is no condition, `select` is `undefined` when every column is selected, and `orderBy` is an empty array when there is no sort. Passing `undefined` to `.where()` and spreading an empty `orderBy` are both valid in Drizzle, so the parts can be applied unconditionally.
+
+Nested selections on relations are not supported by Drizzle's core query builder and throw.
 
 Individual builders are also available: `buildDrizzleWhere`, `buildDrizzleSelect`, `buildDrizzleOrder`.
 
@@ -116,23 +136,29 @@ Individual builders are also available: `buildSupabaseWhere`, `buildSupabaseOrde
 
 ## Operators
 
-| Operator     | Description                             | Prisma                          | Drizzle      | Supabase      |
-| ------------ | --------------------------------------- | ------------------------------- | ------------ | ------------- |
-| `Is`         | Equals                                  | `equals`                        | `eq`         | `eq`          |
-| `IsNot`      | Not equals                              | `not`                           | `ne`         | `neq`         |
-| `GT`         | Greater than                            | `gt`                            | `gt`         | `gt`          |
-| `GTE`        | Greater than or equal                   | `gte`                           | `gte`        | `gte`         |
-| `LT`         | Less than                               | `lt`                            | `lt`         | `lt`          |
-| `LTE`        | Less than or equal                      | `lte`                           | `lte`        | `lte`         |
-| `In`         | Value in array                          | `in`                            | `inArray`    | `in`          |
-| `NotIn`      | Value not in array                      | `notIn`                         | `notInArray` | `not.in`      |
-| `Contains`   | Contains substring (case-insensitive)   | `contains`, `mode: insensitive` | `ilike`      | `ilike`       |
-| `StartsWith` | Starts with (case-insensitive)          | `startsWith`, `mode: insensitive` | `ilike`    | `ilike`       |
-| `EndsWith`   | Ends with (case-insensitive)            | `endsWith`, `mode: insensitive` | `ilike`      | `ilike`       |
-| `IsNull`     | Is null (when `true`)                   | `equals: null`                  | `isNull`     | `is.null`     |
-| `IsNotNull`  | Is not null (when `true`)               | `not: null`                     | `isNotNull`  | `not.is.null` |
+| Operator     | Description                             | Prisma                            | Drizzle      | Supabase      |
+| ------------ | --------------------------------------- | --------------------------------- | ------------ | ------------- |
+| `Is`         | Equals                                  | `equals`                          | `eq`         | `eq`          |
+| `IsNot`      | Not equals                              | `not`                             | `ne`         | `neq`         |
+| `GT`         | Greater than                            | `gt`                              | `gt`         | `gt`          |
+| `GTE`        | Greater than or equal                   | `gte`                             | `gte`        | `gte`         |
+| `LT`         | Less than                               | `lt`                              | `lt`         | `lt`          |
+| `LTE`        | Less than or equal                      | `lte`                             | `lte`        | `lte`         |
+| `In`         | Value in array                          | `in`                              | `inArray`    | `in`          |
+| `NotIn`      | Value not in array                      | `notIn`                           | `notInArray` | `not.in`      |
+| `Contains`   | Contains substring (case-insensitive)   | `contains`, `mode: insensitive`   | `ilike`      | `ilike`       |
+| `StartsWith` | Starts with (case-insensitive)          | `startsWith`, `mode: insensitive` | `ilike`      | `ilike`       |
+| `EndsWith`   | Ends with (case-insensitive)            | `endsWith`, `mode: insensitive`   | `ilike`      | `ilike`       |
+| `IsNull`     | Is null                                 | `equals: null`                    | `isNull`     | `is.null`     |
+| `IsNotNull`  | Is not null                             | `not: null`                       | `isNotNull`  | `not.is.null` |
 
-Operators on the same field and across fields are combined with AND. `undefined` and `null` values are skipped, so optional filters can be passed straight through. LIKE wildcards in text operators are escaped, so user input is always matched literally.
+Rules that hold on all three targets:
+
+- Operators on the same field, and across fields, are combined with AND.
+- `undefined` and `null` values are skipped, so optional filters can be passed straight through. Falsy values such as `0`, `false` and `""` are kept.
+- `IsNull` and `IsNotNull` are flags. They apply unless set to `false`, so a JSON payload sending `null` still works.
+- LIKE wildcards (`%`, `_`) in text operators are escaped, so user input is matched literally. Supabase is the one exception: PostgREST also treats `*` as a wildcard in `ilike` values and offers no way to escape it.
+- An unknown operator throws, so a typo or a bad payload cannot silently widen a query.
 
 ## OR conditions
 
@@ -149,15 +175,15 @@ const filters: QueryFilters<User> = {
 
 This translates to `age >= 18 AND (status = 'active' OR (role = 'admin' AND email IS NOT NULL))`.
 
-## Imports
+## Dialect support
 
-The root export includes every builder. Import from a sub-path to keep the other ORMs out of your bundle, and to avoid loading `drizzle-orm` when it is not installed:
+The builders target PostgreSQL, which is what all three clients are most often used with.
 
-```typescript
-import { buildPrismaFilters } from "@ormx/filters/prisma";
-import { buildDrizzleFilters } from "@ormx/filters/drizzle";
-import { buildSupabaseFilters } from "@ormx/filters/supabase";
-```
+| Target   | Requirement                                                                                       |
+| -------- | ------------------------------------------------------------------------------------------------- |
+| Prisma   | Text operators use `mode: "insensitive"`, PostgreSQL and MongoDB only. Disable with `caseInsensitive: false`. |
+| Drizzle  | Text operators emit `ilike`, which is PostgreSQL-specific. There is no option to change it yet.   |
+| Supabase | PostgREST is PostgreSQL-only.                                                                     |
 
 ## License
 

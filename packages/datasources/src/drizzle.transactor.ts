@@ -1,9 +1,10 @@
 import type { PgQueryResultHKT, PgTransaction } from "drizzle-orm/pg-core";
-import type { DrizzleDatabase } from "./drizzle.datasource";
-import type ITransactor from "./transactor.interface";
+import type { DrizzleDatabase } from "./drizzle.datasource.js";
+import type ITransactor from "./transactor.interface.js";
 
 /**
  * Any Drizzle PostgreSQL transaction, whatever its driver and schema.
+ * Narrower than `DrizzleDatabase`, so callbacks can call `transaction.rollback()`.
  */
 // biome-ignore lint/suspicious/noExplicitAny: the schema type parameters must stay open to accept any transaction.
 export type DrizzleTransaction = PgTransaction<PgQueryResultHKT, any, any>;

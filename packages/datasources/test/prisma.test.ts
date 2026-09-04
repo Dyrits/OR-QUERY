@@ -1,8 +1,9 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PrismaPGlite } from "pglite-prisma-adapter";
 import { afterAll, beforeAll, beforeEach, describe, expect, expectTypeOf, it } from "vitest";
-import { type InferPrismaInsert, type InferPrismaSelect, PrismaDatasource, type PrismaModels, PrismaTransactor } from "../src";
-import { PrismaClient, type User } from "./prisma/generated/client";
+import { type InferPrismaInsert, type InferPrismaSelect, PrismaDatasource, type PrismaModels, PrismaTransactor } from "../src/index.js";
+import { itBehavesLikeADatasource } from "./contract.js";
+import { PrismaClient, type User } from "./prisma/generated/client.js";
 
 let client: PGlite;
 let prisma: PrismaClient;
@@ -37,13 +38,12 @@ beforeEach(async () => {
   await client.exec('TRUNCATE "User", "Post" RESTART IDENTITY CASCADE');
 });
 
-async function seed() {
-  await datasource.store({ age: 30, email: "john@example.com", name: "John" });
-  await datasource.store({ age: 25, name: "Jane", status: "inactive" });
-  await datasource.store({ age: 40, email: "bob@example.com", name: "Bob" });
-}
-
 describe("PrismaDatasource", () => {
+  itBehavesLikeADatasource({
+    datasource: () => datasource,
+    transactor: () => new PrismaTransactor(prisma),
+  });
+
   it("infers model names and row types from the generated client", () => {
     expectTypeOf<PrismaModels<PrismaClient>>().toEqualTypeOf<"user" | "post">();
     expectTypeOf<InferPrismaSelect<PrismaClient["user"]>>().toEqualTypeOf<User>();
@@ -53,42 +53,9 @@ describe("PrismaDatasource", () => {
     expect(() => new PrismaDatasource(prisma, "$connect")).toBeDefined();
   });
 
-  it("stores a row and returns it with generated values", async () => {
-    const user = await datasource.store({ age: 30, name: "John" });
-
-    expect(user).toEqual({ age: 30, email: null, id: 1, name: "John", status: "active" });
-  });
-
-  it("looks up a single row or returns null", async () => {
-    await seed();
-
-    expect(await datasource.lookup({ where: { name: { Contains: "JANE" } } })).toMatchObject({ name: "Jane" });
-    expect(await datasource.lookup({ where: { name: { Is: "nobody" } } })).toBeNull();
-    expect(await datasource.lookup({ order: { age: "desc" } })).toMatchObject({ name: "Bob" });
-  });
-
-  it("lists rows with where, order, pagination and selection", async () => {
-    await seed();
-
-    const adults = await datasource.list({ order: { age: "desc" }, where: { age: { GTE: 30 } } });
-    expect(adults.map((user) => user.name)).toEqual(["Bob", "John"]);
-
-    const page = await datasource.list({ limit: 1, offset: 1, order: { id: "asc" } });
-    expect(page.map((user) => user.name)).toEqual(["Jane"]);
-
-    const partial = await datasource.list({ order: { id: "asc" }, select: { id: true, name: true } });
-    expect(partial).toEqual([
-      { id: 1, name: "John" },
-      { id: 2, name: "Jane" },
-      { id: 3, name: "Bob" },
-    ]);
-
-    const either = await datasource.list({ order: { id: "asc" }, where: { OneOf: [{ email: { IsNull: true } }, { age: { GT: 35 } }] } });
-    expect(either.map((user) => user.name)).toEqual(["Jane", "Bob"]);
-  });
-
   it("selects relations with nested filters", async () => {
-    await seed();
+    await datasource.store({ age: 30, name: "John" });
+    await datasource.store({ age: 25, name: "Jane" });
     await prisma.post.createMany({
       data: [
         { authorId: 1, title: "Hello" },
@@ -108,50 +75,10 @@ describe("PrismaDatasource", () => {
     expect(john).toEqual({ id: 1, posts: [{ title: "Hello" }] });
   });
 
-  it("modifies matching rows and returns the first one", async () => {
-    await seed();
+  it("keeps exact comparisons case-sensitive alongside case-insensitive text operators", async () => {
+    await datasource.store({ age: 1, name: "John" });
 
-    expect(await datasource.modify({ where: { name: { Is: "Jane" } } }, { status: "active" })).toMatchObject({ name: "Jane", status: "active" });
-    expect(await datasource.modify({ where: { name: { Is: "nobody" } } }, { status: "active" })).toBeNull();
-    expect(await datasource.modify({ select: { id: true }, where: { id: { Is: 1 } } }, { age: 31 })).toEqual({ id: 1 });
-  });
-
-  it("destroys matching rows", async () => {
-    await seed();
-
-    await datasource.destroy({ where: { status: { Is: "inactive" } } });
-
-    expect((await datasource.list({ order: { id: "asc" } })).map((user) => user.name)).toEqual(["John", "Bob"]);
-  });
-
-  it("refuses to modify or destroy without a where clause", async () => {
-    await expect(datasource.modify({}, { age: 1 })).rejects.toThrow("requires a where clause");
-    await expect(datasource.destroy({ where: {} })).rejects.toThrow("requires a where clause");
-  });
-
-  it("commits transactions", async () => {
-    const transactor = new PrismaTransactor(prisma);
-
-    const id = await transactor.transact(async (transaction) => {
-      const scoped = datasource.withTransaction(transaction);
-      const user = await scoped.store({ age: 20, name: "Tx" });
-      await scoped.modify({ where: { id: { Is: user.id } } }, { age: 21 });
-      return user.id;
-    });
-
-    expect(await datasource.lookup({ where: { id: { Is: id } } })).toMatchObject({ age: 21, name: "Tx" });
-  });
-
-  it("rolls back transactions on error", async () => {
-    const transactor = new PrismaTransactor(prisma);
-
-    await expect(
-      transactor.transact(async (transaction) => {
-        await datasource.withTransaction(transaction).store({ age: 20, name: "Rollback" });
-        throw new Error("boom");
-      }),
-    ).rejects.toThrow("boom");
-
-    expect(await datasource.list()).toEqual([]);
+    expect(await datasource.list({ where: { name: { Contains: "JOHN", IsNot: "john" } } })).toHaveLength(1);
+    expect(await datasource.list({ where: { name: { Contains: "JOHN", IsNot: "John" } } })).toHaveLength(0);
   });
 });

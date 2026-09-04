@@ -1,8 +1,8 @@
 import { getTableColumns, type SQL } from "drizzle-orm";
 import { integer, PgDialect, pgTable, QueryBuilder, text, timestamp } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
-import { buildDrizzleFilters, buildDrizzleOrder, buildDrizzleSelect, buildDrizzleWhere } from "./drizzle";
-import type { QueryFilters } from "./types";
+import { buildDrizzleFilters, buildDrizzleOrder, buildDrizzleSelect, buildDrizzleWhere } from "./drizzle/index.js";
+import type { QueryFilters } from "./types.js";
 
 const users = pgTable("users", {
   age: integer("age"),
@@ -56,8 +56,16 @@ describe("buildDrizzleWhere", () => {
     expect(render(buildDrizzleWhere<User>({ name: { Contains: "50%_off" } }, users))).toEqual({ params: ["%50\\%\\_off%"], sql: '"users"."name" ilike $1' });
   });
 
-  it("ignores IsNull and IsNotNull when set to false", () => {
+  it("applies flag operators unless they are false, so JSON payloads using null keep working", () => {
+    expect(render(buildDrizzleWhere<User>({ email: { IsNull: null as unknown as boolean } }, users))).toEqual({
+      params: [],
+      sql: '"users"."email" is null',
+    });
     expect(buildDrizzleWhere<User>({ email: { IsNotNull: false, IsNull: false } }, users)).toBeUndefined();
+  });
+
+  it("rejects unknown operators instead of dropping them", () => {
+    expect(() => buildDrizzleWhere<User>({ name: { Like: "john" } as never }, users)).toThrow('Unknown operator "Like"');
   });
 
   it("keeps falsy values such as 0", () => {
@@ -97,8 +105,10 @@ describe("buildDrizzleWhere", () => {
     });
   });
 
-  it("throws on unknown columns", () => {
+  it("throws on unknown columns, including inherited property names", () => {
     expect(() => buildDrizzleWhere<Record<string, unknown>>({ posts: { IsNull: true } }, users)).toThrow('Unknown column "posts"');
+    expect(() => buildDrizzleWhere<Record<string, unknown>>({ constructor: { Is: "x" } }, users)).toThrow('Unknown column "constructor"');
+    expect(() => buildDrizzleWhere<Record<string, unknown>>({ toString: { Is: "x" } }, getTableColumns(users))).toThrow('Unknown column "toString"');
   });
 });
 

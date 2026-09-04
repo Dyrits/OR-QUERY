@@ -1,9 +1,9 @@
 import type { SQL } from "drizzle-orm";
-import type { QueryFilters } from "../types";
-import type { ColumnSource } from "./columns";
-import { buildDrizzleOrder } from "./order";
-import { buildDrizzleSelect, type DrizzleSelect } from "./select";
-import { buildDrizzleWhere } from "./where";
+import type { QueryFilters } from "../types.js";
+import type { ColumnSource } from "./columns.js";
+import { buildDrizzleOrder } from "./order.js";
+import { buildDrizzleSelect, type DrizzleSelect } from "./select.js";
+import { buildDrizzleWhere } from "./where.js";
 
 export type DrizzleFilters<TSource extends ColumnSource = ColumnSource> = {
   where: SQL | undefined;
@@ -23,7 +23,10 @@ export type DrizzleFilters<TSource extends ColumnSource = ColumnSource> = {
  * db.select().from(users).where(where).orderBy(...orderBy);
  * ```
  */
-export function buildDrizzleFilters<TEntity, TSource extends ColumnSource = ColumnSource>(filters: QueryFilters<TEntity>, columns: TSource): DrizzleFilters<TSource> {
+export function buildDrizzleFilters<TEntity, TSource extends ColumnSource = ColumnSource>(
+  filters: QueryFilters<TEntity>,
+  columns: TSource,
+): DrizzleFilters<TSource> {
   return {
     limit: filters.limit,
     offset: filters.offset,

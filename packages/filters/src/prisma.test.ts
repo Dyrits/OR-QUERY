@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildPrismaFilters, buildPrismaOrder, buildPrismaSelect, buildPrismaWhere } from "./prisma";
-import type { QueryFilters } from "./types";
+import { buildPrismaFilters, buildPrismaOrder, buildPrismaSelect, buildPrismaWhere } from "./prisma/index.js";
+import type { QueryFilters } from "./types.js";
 
 type Post = {
   id: number;
@@ -41,6 +41,32 @@ describe("buildPrismaWhere", () => {
     ["IsNotNull", { email: { IsNotNull: true } }, { email: { not: null } }],
   ] as const)("maps %s", (_operator, where, expected) => {
     expect(buildPrismaWhere<User>(where)).toEqual(expected);
+  });
+
+  it("escapes LIKE wildcards in text operators", () => {
+    expect(buildPrismaWhere<User>({ name: { Contains: "50%_off" } })).toEqual({ name: { contains: "50\\%\\_off", mode: "insensitive" } });
+  });
+
+  it("isolates case-insensitive text operators, because Prisma applies mode to every operator of a field", () => {
+    expect(buildPrismaWhere<User>({ name: { Contains: "OHN", IsNot: "John" } })).toEqual({
+      AND: [{ name: { contains: "OHN", mode: "insensitive" } }],
+      name: { not: "John" },
+    });
+  });
+
+  it("keeps text and exact operators together when case sensitivity is off", () => {
+    expect(buildPrismaWhere<User>({ name: { Contains: "OHN", IsNot: "John" } }, { caseInsensitive: false })).toEqual({
+      name: { contains: "OHN", not: "John" },
+    });
+  });
+
+  it("applies flag operators unless they are false, so JSON payloads using null keep working", () => {
+    expect(buildPrismaWhere<User>({ email: { IsNull: null as unknown as boolean } })).toEqual({ email: { equals: null } });
+    expect(buildPrismaWhere<User>({ email: { IsNotNull: false, IsNull: false } })).toEqual({});
+  });
+
+  it("rejects unknown operators instead of dropping them", () => {
+    expect(() => buildPrismaWhere<User>({ name: { Like: "john" } as never })).toThrow('Unknown operator "Like"');
   });
 
   it("supports case-sensitive text matching when requested", () => {

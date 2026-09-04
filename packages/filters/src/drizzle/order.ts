@@ -1,6 +1,6 @@
 import { asc, desc, type SQL } from "drizzle-orm";
-import type { Order } from "../types";
-import { type ColumnSource, resolveColumn } from "./columns";
+import type { Order } from "../types.js";
+import { type ColumnSource, resolveColumn } from "./columns.js";
 
 /**
  * Converts a generic Order clause into Drizzle `orderBy` arguments.

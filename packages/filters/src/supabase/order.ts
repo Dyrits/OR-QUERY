@@ -1,5 +1,5 @@
-import type { Order } from "../types";
-import { reference, type SupabaseQuery } from "./query";
+import type { Order } from "../types.js";
+import { reference, type SupabaseQuery } from "./query.js";
 
 /**
  * Applies a generic Order clause to a Supabase query builder.

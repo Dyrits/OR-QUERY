@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
-import { type SupabaseClientLike, SupabaseDatasource, SupabaseDatasourceError } from "../src";
+import { type SupabaseClientLike, SupabaseDatasource, SupabaseDatasourceError } from "../src/index.js";
 
 type User = {
   id: number;
@@ -18,27 +18,7 @@ type Call = [method: string, ...args: unknown[]];
 function createClient(response: { data?: unknown; error?: unknown } = {}) {
   const calls: Call[] = [];
   const builder: Record<string, unknown> = {};
-  const methods = [
-    "select",
-    "insert",
-    "update",
-    "delete",
-    "single",
-    "eq",
-    "neq",
-    "gt",
-    "gte",
-    "lt",
-    "lte",
-    "in",
-    "ilike",
-    "is",
-    "not",
-    "or",
-    "order",
-    "limit",
-    "range",
-  ];
+  const methods = ["select", "insert", "update", "delete", "single", "filter", "or", "order", "limit", "range"];
 
   for (const method of methods) {
     builder[method] = (...args: unknown[]) => {
@@ -97,7 +77,7 @@ describe("SupabaseDatasource", () => {
     expect(client.calls).toEqual([
       ["from", "users"],
       ["select", "id,name"],
-      ["gte", "age", "18"],
+      ["filter", "age", "gte", "18"],
       ["order", "age", { ascending: false }],
       ["range", 20, 29, undefined],
     ]);
@@ -109,7 +89,7 @@ describe("SupabaseDatasource", () => {
     expect(found.calls).toEqual([
       ["from", "users"],
       ["select", undefined],
-      ["eq", "id", "1"],
+      ["filter", "id", "eq", "1"],
       ["limit", 1, undefined],
     ]);
 
@@ -117,15 +97,15 @@ describe("SupabaseDatasource", () => {
     expect(await new SupabaseDatasource<User>(missing, "users").lookup()).toBeNull();
   });
 
-  it("modifies matching rows and returns the first one", async () => {
+  it("modifies matching rows and returns them", async () => {
     const client = createClient({ data: [{ id: 1, status: "active" }] });
     const datasource = new SupabaseDatasource<User>(client, "users");
 
-    expect(await datasource.modify({ where: { id: { Is: 1 } } }, { status: "active" })).toEqual({ id: 1, status: "active" });
+    expect(await datasource.modify({ where: { id: { Is: 1 } } }, { status: "active" })).toEqual([{ id: 1, status: "active" }]);
     expect(client.calls).toEqual([
       ["from", "users"],
       ["update", { status: "active" }],
-      ["eq", "id", "1"],
+      ["filter", "id", "eq", "1"],
       ["select", undefined],
     ]);
   });
@@ -136,22 +116,32 @@ describe("SupabaseDatasource", () => {
 
     await datasource.destroy({ where: { status: { In: ["banned", "deleted"] } } });
 
-    expect(client.calls).toEqual([["from", "users"], ["delete"], ["in", "status", ["banned", "deleted"]]]);
+    expect(client.calls).toEqual([["from", "users"], ["delete"], ["filter", "status", "in", "(banned,deleted)"]]);
   });
 
-  it("refuses to modify or destroy without a where clause", async () => {
-    const datasource = new SupabaseDatasource<User>(createClient(), "users");
-
-    await expect(datasource.modify({}, { age: 1 })).rejects.toThrow("requires a where clause");
-    await expect(datasource.destroy({ where: {} })).rejects.toThrow("requires a where clause");
-  });
-
-  it("throws PostgREST errors", async () => {
-    const client = createClient({ error: { code: "42P01", message: 'relation "users" does not exist' } });
+  it("refuses a write whose filters build no condition", async () => {
+    const client = createClient();
     const datasource = new SupabaseDatasource<User>(client, "users");
+    const blanks = [{}, { where: {} }, { where: { name: undefined } }, { where: { id: { Is: undefined } } }, { where: { OneOf: [] } }];
 
-    await expect(datasource.list()).rejects.toThrow(SupabaseDatasourceError);
-    await expect(datasource.list()).rejects.toThrow('relation "users" does not exist');
+    for (const filters of blanks) {
+      await expect(datasource.modify(filters, { status: "wiped" })).rejects.toThrow("at least one condition");
+      await expect(datasource.destroy(filters)).rejects.toThrow("at least one condition");
+    }
+
+    expect(client.calls).toEqual([]);
+  });
+
+  it("wraps PostgREST errors, including native ones", async () => {
+    const plain = new SupabaseDatasource<User>(createClient({ error: { code: "42P01", message: 'relation "users" does not exist' } }), "users");
+    await expect(plain.list()).rejects.toThrow(SupabaseDatasourceError);
+    await expect(plain.list()).rejects.toThrow('relation "users" does not exist');
+
+    const native = new SupabaseDatasource<User>(createClient({ error: new Error("network down") }), "users");
+    const error = await native.list().catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(SupabaseDatasourceError);
+    expect((error as SupabaseDatasourceError).cause).toBeInstanceOf(Error);
   });
 
   it("does not support transactions", () => {

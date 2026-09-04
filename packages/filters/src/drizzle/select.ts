@@ -1,6 +1,6 @@
-import { isNestedSelect } from "../shared";
-import type { Select } from "../types";
-import { type ColumnOf, type ColumnSource, resolveColumn } from "./columns";
+import { isNestedSelect } from "../shared.js";
+import type { Select } from "../types.js";
+import { type ColumnOf, type ColumnSource, resolveColumn } from "./columns.js";
 
 /**
  * Columns to pass to Drizzle's `db.select(...)`, typed after the column source.
@@ -12,7 +12,10 @@ export type DrizzleSelect<TSource extends ColumnSource = ColumnSource> = Record<
  * Returns `undefined` when no field is selected, meaning all columns.
  * Nested selections on relations are not supported by Drizzle's core query builder and throw.
  */
-export function buildDrizzleSelect<TEntity, TSource extends ColumnSource = ColumnSource>(select: Select<TEntity> | undefined, columns: TSource): DrizzleSelect<TSource> | undefined {
+export function buildDrizzleSelect<TEntity, TSource extends ColumnSource = ColumnSource>(
+  select: Select<TEntity> | undefined,
+  columns: TSource,
+): DrizzleSelect<TSource> | undefined {
   if (!select) {
     return undefined;
   }

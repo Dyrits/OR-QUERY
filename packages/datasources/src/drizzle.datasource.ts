@@ -1,9 +1,10 @@
 import type { QueryFilters } from "@ormx/filters";
-import { buildDrizzleFilters } from "@ormx/filters/drizzle";
-import { getTableColumns } from "drizzle-orm";
+import { buildDrizzleOrder, buildDrizzleSelect, buildDrizzleWhere } from "@ormx/filters/drizzle";
+import { type AnyColumn, getTableColumns } from "drizzle-orm";
 import type { PgDatabase, PgInsertValue, PgQueryResultHKT, PgTable, PgUpdateSetSource, SelectedFields } from "drizzle-orm/pg-core";
-import type IDatasource from "./datasource.interface";
-import { assertFiltered } from "./guards";
+import type IDatasource from "./datasource.interface.js";
+import type { WriteFilters } from "./datasource.interface.js";
+import { assertFiltered, first } from "./guards.js";
 
 /**
  * Any Drizzle PostgreSQL database or transaction, whatever its driver and schema.
@@ -18,10 +19,14 @@ export type DrizzleDatabase = PgDatabase<PgQueryResultHKT, any, any>;
 export default class DrizzleDatasource<TTable extends PgTable, TSelect = TTable["$inferSelect"], TInsert extends object = TTable["$inferInsert"]>
   implements IDatasource<TSelect, TInsert, DrizzleDatabase>
 {
+  private readonly columns: Record<string, AnyColumn>;
+
   constructor(
     private readonly database: DrizzleDatabase,
     private readonly table: TTable,
-  ) {}
+  ) {
+    this.columns = getTableColumns(table) as Record<string, AnyColumn>;
+  }
 
   withTransaction(transaction: DrizzleDatabase): DrizzleDatasource<TTable, TSelect, TInsert> {
     return new DrizzleDatasource<TTable, TSelect, TInsert>(transaction, this.table);
@@ -37,18 +42,15 @@ export default class DrizzleDatasource<TTable extends PgTable, TSelect = TTable[
   }
 
   async lookup(filters: QueryFilters<TSelect> = {}): Promise<TSelect | null> {
-    const [row] = await this.list({ ...filters, limit: 1 });
-
-    return row ?? null;
+    return first(await this.list({ ...filters, limit: 1 }));
   }
 
   async list(filters: QueryFilters<TSelect> = {}): Promise<TSelect[]> {
-    const { limit, offset, orderBy, select, where } = buildDrizzleFilters(filters, this.table);
+    const where = buildDrizzleWhere(filters.where, this.columns);
+    const select = buildDrizzleSelect(filters.select, this.columns);
+    const orderBy = buildDrizzleOrder(filters.order, this.columns);
 
-    let query = this.database
-      .select((select ?? getTableColumns(this.table)) as SelectedFields)
-      .from(this.table as PgTable)
-      .$dynamic();
+    let query = (select ? this.database.select(select as SelectedFields) : this.database.select()).from(this.table as PgTable).$dynamic();
 
     if (where) {
       query = query.where(where);
@@ -56,32 +58,32 @@ export default class DrizzleDatasource<TTable extends PgTable, TSelect = TTable[
     if (orderBy.length > 0) {
       query = query.orderBy(...orderBy);
     }
-    if (limit !== undefined) {
-      query = query.limit(limit);
+    if (filters.limit !== undefined) {
+      query = query.limit(filters.limit);
     }
-    if (offset !== undefined) {
-      query = query.offset(offset);
+    if (filters.offset !== undefined) {
+      query = query.offset(filters.offset);
     }
 
     return (await query) as TSelect[];
   }
 
-  async modify(filters: QueryFilters<TSelect>, payload: Partial<TInsert>): Promise<TSelect | null> {
-    assertFiltered(filters, "modify");
-    const { select, where } = buildDrizzleFilters(filters, this.table);
+  async modify(filters: WriteFilters<TSelect>, payload: Partial<TInsert>): Promise<TSelect[]> {
+    const where = buildDrizzleWhere(filters.where, this.columns);
+    assertFiltered(where, "modify");
 
+    const select = buildDrizzleSelect(filters.select, this.columns);
     const query = this.database
       .update(this.table)
       .set(payload as PgUpdateSetSource<TTable>)
       .where(where);
-    const rows: unknown[] = select ? await query.returning(select as SelectedFields) : await query.returning();
 
-    return (rows[0] as TSelect | undefined) ?? null;
+    return (select ? await query.returning(select as SelectedFields) : await query.returning()) as TSelect[];
   }
 
-  async destroy(filters: QueryFilters<TSelect>): Promise<void> {
-    assertFiltered(filters, "destroy");
-    const { where } = buildDrizzleFilters(filters, this.table);
+  async destroy(filters: WriteFilters<TSelect>): Promise<void> {
+    const where = buildDrizzleWhere(filters.where, this.columns);
+    assertFiltered(where, "destroy");
 
     await this.database.delete(this.table).where(where);
   }

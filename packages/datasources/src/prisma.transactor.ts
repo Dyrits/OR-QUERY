@@ -1,4 +1,4 @@
-import type ITransactor from "./transactor.interface";
+import type ITransactor from "./transactor.interface.js";
 
 /**
  * Structural subset of a Prisma client used by the transactor.

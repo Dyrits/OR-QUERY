@@ -1,5 +1,5 @@
-import { escapeLike, isBlank, isEnabled, operatorEntries, splitWhere } from "../shared";
-import type { FieldOperators, Operator, ScalarKeys, Where } from "../types";
+import { escapeLike, isBlank, isEnabled, operatorEntries, splitWhere } from "../shared.js";
+import type { FieldOperators, Operator, ScalarKeys, Where } from "../types.js";
 
 /**
  * Shape of Prisma's per-field filter operators.

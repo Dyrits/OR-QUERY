@@ -13,7 +13,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**", "!/api/worker-configuration.d.ts"]
+    "includes": ["**", "!**/dist", "!**/generated"]
   },
   "formatter": {
     "enabled": true,

@@ -1,7 +1,7 @@
-import { isNestedSelect } from "../shared";
-import type { QueryFilters, Scalar, Select, Unwrap } from "../types";
-import { buildPrismaOrder, type PrismaOrderBy } from "./order";
-import { buildPrismaWhere, type PrismaOptions, type PrismaWhere } from "./where";
+import { isNestedSelect } from "../shared.js";
+import type { QueryFilters, Scalar, Select, Unwrap } from "../types.js";
+import { buildPrismaOrder, type PrismaOrderBy } from "./order.js";
+import { buildPrismaWhere, type PrismaOptions, type PrismaWhere } from "./where.js";
 
 /**
  * Prisma `select` type for an entity, with nested queries on relations.

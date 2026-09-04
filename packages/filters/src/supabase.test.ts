@@ -7,8 +7,8 @@ import {
   buildSupabaseWhere,
   buildSupabaseWhereString,
   type SupabaseQuery,
-} from "./supabase";
-import type { QueryFilters } from "./types";
+} from "./supabase/index.js";
+import type { QueryFilters } from "./types.js";
 
 type Post = {
   id: number;
@@ -32,7 +32,7 @@ type Call = [method: string, ...args: unknown[]];
 function createQuery(): SupabaseQuery & { calls: Call[] } {
   const calls: Call[] = [];
   const query = { calls } as SupabaseQuery & { calls: Call[] };
-  const methods = ["eq", "neq", "gt", "gte", "lt", "lte", "in", "ilike", "is", "not", "or", "order", "limit", "range"] as const;
+  const methods = ["filter", "or", "order", "limit", "range"] as const;
 
   for (const method of methods) {
     (query as unknown as Record<string, unknown>)[method] = (...args: unknown[]) => {
@@ -61,19 +61,19 @@ describe("buildSupabaseWhere", () => {
   });
 
   it.each([
-    ["Is", { name: { Is: "john" } }, [["eq", "name", "john"]]],
-    ["IsNot", { status: { IsNot: "inactive" } }, [["neq", "status", "inactive"]]],
-    ["GT", { age: { GT: 18 } }, [["gt", "age", "18"]]],
-    ["GTE", { age: { GTE: 21 } }, [["gte", "age", "21"]]],
-    ["LT", { age: { LT: 65 } }, [["lt", "age", "65"]]],
-    ["LTE", { age: { LTE: 100 } }, [["lte", "age", "100"]]],
-    ["In", { status: { In: ["active", "pending"] } }, [["in", "status", ["active", "pending"]]]],
-    ["NotIn", { status: { NotIn: ["banned", "deleted"] } }, [["not", "status", "in", "(banned,deleted)"]]],
-    ["Contains", { name: { Contains: "john" } }, [["ilike", "name", "%john%"]]],
-    ["StartsWith", { email: { StartsWith: "admin" } }, [["ilike", "email", "admin%"]]],
-    ["EndsWith", { email: { EndsWith: "@example.com" } }, [["ilike", "email", "%@example.com"]]],
-    ["IsNull", { email: { IsNull: true } }, [["is", "email", null]]],
-    ["IsNotNull", { email: { IsNotNull: true } }, [["not", "email", "is", null]]],
+    ["Is", { name: { Is: "john" } }, [["filter", "name", "eq", "john"]]],
+    ["IsNot", { status: { IsNot: "inactive" } }, [["filter", "status", "neq", "inactive"]]],
+    ["GT", { age: { GT: 18 } }, [["filter", "age", "gt", "18"]]],
+    ["GTE", { age: { GTE: 21 } }, [["filter", "age", "gte", "21"]]],
+    ["LT", { age: { LT: 65 } }, [["filter", "age", "lt", "65"]]],
+    ["LTE", { age: { LTE: 100 } }, [["filter", "age", "lte", "100"]]],
+    ["In", { status: { In: ["active", "pending"] } }, [["filter", "status", "in", "(active,pending)"]]],
+    ["NotIn", { status: { NotIn: ["banned", "deleted"] } }, [["filter", "status", "not.in", "(banned,deleted)"]]],
+    ["Contains", { name: { Contains: "john" } }, [["filter", "name", "ilike", "%john%"]]],
+    ["StartsWith", { email: { StartsWith: "admin" } }, [["filter", "email", "ilike", "admin%"]]],
+    ["EndsWith", { email: { EndsWith: "@example.com" } }, [["filter", "email", "ilike", "%@example.com"]]],
+    ["IsNull", { email: { IsNull: true } }, [["filter", "email", "is", null]]],
+    ["IsNotNull", { email: { IsNotNull: true } }, [["filter", "email", "not.is", null]]],
   ] as const)("maps %s", (_operator, where, expected) => {
     expect(calls<User>(where)).toEqual(expected);
   });
@@ -81,36 +81,41 @@ describe("buildSupabaseWhere", () => {
   it("serializes dates as ISO strings", () => {
     const date = new Date("2026-01-02T03:04:05.000Z");
 
-    expect(calls<User>({ createdAt: { GTE: date } })).toEqual([["gte", "createdAt", "2026-01-02T03:04:05.000Z"]]);
+    expect(calls<User>({ createdAt: { GTE: date } })).toEqual([["filter", "createdAt", "gte", "2026-01-02T03:04:05.000Z"]]);
   });
 
   it("escapes LIKE wildcards in text operators", () => {
-    expect(calls<User>({ name: { Contains: "50%_off" } })).toEqual([["ilike", "name", "%50\\%\\_off%"]]);
+    expect(calls<User>({ name: { Contains: "50%_off" } })).toEqual([["filter", "name", "ilike", "%50\\%\\_off%"]]);
   });
 
-  it("quotes reserved characters inside NotIn lists", () => {
-    expect(calls<User>({ name: { NotIn: ["a,b", "(c)"] } })).toEqual([["not", "name", "in", '("a,b","(c)")']]);
+  it("quotes reserved characters inside lists", () => {
+    expect(calls<User>({ name: { NotIn: ["a,b", "(c)"] } })).toEqual([["filter", "name", "not.in", '("a,b","(c)")']]);
   });
 
-  it("ignores IsNull and IsNotNull when set to false", () => {
+  it("applies flag operators unless they are false, so JSON payloads using null keep working", () => {
+    expect(calls<User>({ email: { IsNull: null as unknown as boolean } })).toEqual([["filter", "email", "is", null]]);
     expect(calls<User>({ email: { IsNotNull: false, IsNull: false } })).toEqual([]);
   });
 
+  it("rejects unknown operators instead of dropping them", () => {
+    expect(() => calls<User>({ name: { Like: "john" } as never })).toThrow('Unknown operator "Like"');
+  });
+
   it("keeps falsy values such as 0", () => {
-    expect(calls<User>({ age: { Is: 0 } })).toEqual([["eq", "age", "0"]]);
+    expect(calls<User>({ age: { Is: 0 } })).toEqual([["filter", "age", "eq", "0"]]);
   });
 
   it("chains operators and fields", () => {
     expect(calls<User>({ age: { GTE: 18, LTE: 65 }, status: { Is: "active" } })).toEqual([
-      ["gte", "age", "18"],
-      ["lte", "age", "65"],
-      ["eq", "status", "active"],
+      ["filter", "age", "gte", "18"],
+      ["filter", "age", "lte", "65"],
+      ["filter", "status", "eq", "active"],
     ]);
   });
 
   it("maps OneOf to an or() filter string", () => {
     expect(calls<User>({ age: { GTE: 18 }, OneOf: [{ status: { Is: "active" } }, { role: { Is: "admin" } }] })).toEqual([
-      ["gte", "age", "18"],
+      ["filter", "age", "gte", "18"],
       ["or", "status.eq.active,role.eq.admin", undefined],
     ]);
   });
@@ -119,6 +124,12 @@ describe("buildSupabaseWhere", () => {
     expect(calls<User>({ OneOf: [{ name: { Contains: "admin" }, status: { Is: "active" } }, { role: { Is: "superadmin" } }] })).toEqual([
       ["or", "and(name.ilike.%admin%,status.eq.active),role.eq.superadmin", undefined],
     ]);
+  });
+
+  it("quotes values that would otherwise break the or() grammar", () => {
+    expect(buildSupabaseWhereString<User>({ OneOf: [{ name: { Is: 'Say "hi", ok' } }, { name: { Contains: "a,b" } }] })).toBe(
+      'or(name.eq."Say \\"hi\\", ok",name.ilike."%a,b%")',
+    );
   });
 
   it("supports nested OneOf groups and every operator inside or()", () => {
@@ -131,7 +142,7 @@ describe("buildSupabaseWhere", () => {
 
   it("qualifies columns with the embedded resource path", () => {
     expect(calls<Post>({ OneOf: [{ title: { Is: "a" } }, { title: { Is: "b" } }], published: { Is: true } }, "posts")).toEqual([
-      ["eq", "posts.published", "true"],
+      ["filter", "posts.published", "eq", "true"],
       ["or", "title.eq.a,title.eq.b", { referencedTable: "posts" }],
     ]);
   });
@@ -208,10 +219,10 @@ describe("buildSupabaseFilters", () => {
 
     expect(buildSupabaseFilters(query, filters)).toBe(query);
     expect(query.calls).toEqual([
-      ["gte", "age", "18"],
+      ["filter", "age", "gte", "18"],
       ["order", "createdAt", { ascending: false }],
       ["range", 20, 29, undefined],
-      ["eq", "posts.published", "true"],
+      ["filter", "posts.published", "eq", "true"],
       ["order", "id", { ascending: false, referencedTable: "posts" }],
       ["limit", 3, { referencedTable: "posts" }],
     ]);

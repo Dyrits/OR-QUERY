@@ -2,8 +2,8 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    // Starting a PGlite instance and generating its schema is slower than the default timeouts allow.
     hookTimeout: 60_000,
-    include: ["test/**/*.test.ts"],
     testTimeout: 30_000,
   },
 });

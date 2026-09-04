@@ -1,7 +1,7 @@
 import { type AnyColumn, and, eq, gt, gte, ilike, inArray, isNotNull, isNull, lt, lte, ne, notInArray, or, type SQL } from "drizzle-orm";
-import { escapeLike, isBlank, isEnabled, operatorEntries, splitWhere } from "../shared";
-import type { Operator, Where } from "../types";
-import { type ColumnSource, resolveColumn } from "./columns";
+import { escapeLike, isBlank, isEnabled, operatorEntries, splitWhere } from "../shared.js";
+import type { Operator, Where } from "../types.js";
+import { type ColumnSource, resolveColumn } from "./columns.js";
 
 type Builder = (column: AnyColumn, value: unknown) => SQL | undefined;
 

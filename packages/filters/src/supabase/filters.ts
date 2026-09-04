@@ -1,8 +1,8 @@
-import type { QueryFilters } from "../types";
-import { buildSupabaseOrder } from "./order";
-import { reference, type SupabaseQuery } from "./query";
-import { listEmbedded } from "./select";
-import { buildSupabaseWhere } from "./where";
+import type { QueryFilters } from "../types.js";
+import { buildSupabaseOrder } from "./order.js";
+import { reference, type SupabaseQuery } from "./query.js";
+import { listEmbedded } from "./select.js";
+import { buildSupabaseWhere } from "./where.js";
 
 /**
  * Applies pagination to a Supabase query builder.

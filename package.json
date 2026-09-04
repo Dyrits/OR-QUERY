@@ -7,7 +7,7 @@
   "scripts": {
     "build": "bun run --filter '*' build",
     "check": "biome check --write",
-    "test": "bun run build && bun run --filter '*' test",
+    "test": "bun run --filter '@ormx/filters' build && bun run --filter '*' test",
     "typecheck": "bun run --filter '@ormx/filters' build && bun run --filter '*' typecheck"
   },
   "workspaces": [

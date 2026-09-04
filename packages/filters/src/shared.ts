@@ -1,9 +1,23 @@
-import type { FieldOperators, Operator, QueryFilters, Where } from "./types";
+import type { FieldOperators, Operator, QueryFilters, Where } from "./types.js";
 
 /**
  * Every supported operator, used to reject unknown ones coming from untrusted input.
  */
-export const OPERATORS: readonly Operator[] = ["Is", "IsNot", "GT", "GTE", "LT", "LTE", "In", "NotIn", "Contains", "StartsWith", "EndsWith", "IsNull", "IsNotNull"];
+export const OPERATORS: readonly Operator[] = [
+  "Is",
+  "IsNot",
+  "GT",
+  "GTE",
+  "LT",
+  "LTE",
+  "In",
+  "NotIn",
+  "Contains",
+  "StartsWith",
+  "EndsWith",
+  "IsNull",
+  "IsNotNull",
+];
 
 const known = new Set<string>(OPERATORS);
 

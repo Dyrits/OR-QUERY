@@ -1,6 +1,6 @@
-import { escapeLike, isBlank, isEnabled, operatorEntries, splitWhere } from "../shared";
-import type { Operator, Where } from "../types";
-import { formatList, formatValue, qualify, quoteValue, reference, type SupabaseQuery } from "./query";
+import { escapeLike, isBlank, isEnabled, operatorEntries, splitWhere } from "../shared.js";
+import type { Operator, Where } from "../types.js";
+import { formatList, formatValue, qualify, quoteValue, reference, type SupabaseQuery } from "./query.js";
 
 /**
  * A PostgREST filter: `operator.value`, where `value` is `null` for `is` checks and a parenthesised list for `in` checks.

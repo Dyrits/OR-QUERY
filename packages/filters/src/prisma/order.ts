@@ -1,4 +1,4 @@
-import type { Order, OrderDirection, ScalarKeys } from "../types";
+import type { Order, OrderDirection, ScalarKeys } from "../types.js";
 
 /**
  * Prisma `orderBy` type for an entity, one entry per sorted field to preserve priority.
