@@ -1,13 +1,13 @@
 # ORMX
 
-A monorepo for unified ORM utilities. Write your queries once with a common filter format, then run them on Prisma, Drizzle or Supabase.
+A monorepo for unified ORM utilities. Write your queries once with a common filter format, then run them on Prisma, Drizzle, TypeORM or Supabase.
 
 ## Packages
 
 | Package | Version | Description | Docs |
 |---------|---------|-------------|------|
-| [@ormx/filters](./packages/filters) | 0.2.0 | Unified where, select, order and pagination across Prisma, Drizzle and Supabase | [README](./packages/filters/README.md) |
-| [@ormx/datasources](./packages/datasources) | 0.2.0 | Unified CRUD datasource with transactions for Drizzle, Prisma and Supabase | [README](./packages/datasources/README.md) |
+| [@ormx/filters](./packages/filters) | 0.3.0 | Unified where, select, order and pagination across Prisma, Drizzle, TypeORM and Supabase | [README](./packages/filters/README.md) |
+| [@ormx/datasources](./packages/datasources) | 0.3.0 | Unified CRUD datasource with transactions for Drizzle, Prisma, TypeORM and Supabase | [README](./packages/datasources/README.md) |
 
 Both packages target PostgreSQL, and both expose a sub-path per ORM so you only load the one you use.
 
@@ -16,7 +16,7 @@ Both packages target PostgreSQL, and both expose a sub-path per ORM so you only 
 ```bash
 bun install
 bun run build      # builds every package
-bun run test       # builds filters, then runs both suites (Drizzle and Prisma run against an embedded PGlite database)
+bun run test       # builds filters, then runs both suites (Drizzle, Prisma and TypeORM run against embedded PGlite databases)
 bun run typecheck  # type-checks sources and tests
 bun run check      # lints and formats with Biome
 ```

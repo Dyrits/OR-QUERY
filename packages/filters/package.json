@@ -1,9 +1,10 @@
 {
   "author": "",
-  "description": "Unified query filtering across Prisma, Drizzle, and Supabase",
+  "description": "Unified query filtering across Prisma, Drizzle, TypeORM, and Supabase",
   "devDependencies": {
     "@supabase/supabase-js": "^2.49.4",
     "drizzle-orm": "^0.45.1",
+    "typeorm": "^1.1.1",
     "typescript": "^5.7.0",
     "vitest": "^5.0.0"
   },
@@ -23,6 +24,10 @@
     "./supabase": {
       "import": "./dist/supabase/index.js",
       "types": "./dist/supabase/index.d.ts"
+    },
+    "./typeorm": {
+      "import": "./dist/typeorm/index.js",
+      "types": "./dist/typeorm/index.d.ts"
     }
   },
   "files": [
@@ -36,6 +41,7 @@
     "prisma",
     "drizzle",
     "supabase",
+    "typeorm",
     "orm",
     "database"
   ],
@@ -44,10 +50,14 @@
   "module": "./dist/index.js",
   "name": "@ormx/filters",
   "peerDependencies": {
-    "drizzle-orm": ">=0.30.0"
+    "drizzle-orm": ">=0.30.0",
+    "typeorm": ">=1.0.0"
   },
   "peerDependenciesMeta": {
     "drizzle-orm": {
+      "optional": true
+    },
+    "typeorm": {
       "optional": true
     }
   },
@@ -57,7 +67,7 @@
   "repository": {
     "directory": "packages/filters",
     "type": "git",
-    "url": "https://github.com/Dyrits/ORMX.git"
+    "url": "git+https://github.com/Dyrits/ORMX.git"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -68,5 +78,5 @@
   },
   "type": "module",
   "types": "./dist/index.d.ts",
-  "version": "0.2.0"
+  "version": "0.3.0"
 }

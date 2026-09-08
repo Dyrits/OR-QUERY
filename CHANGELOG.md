@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+
+- TypeORM 1.x filter builders at `@ormx/filters/typeorm`, including PostgreSQL case-insensitive text matching, nested `OneOf` groups, projections, ordering and pagination.
+- `TypeOrmDatasource` and `TypeOrmTransactor` at `@ormx/datasources/typeorm`, with entity inference, metadata-aware relation projections, PostgreSQL `RETURNING`, and transaction support.
+
 ## 0.2.0
 
 Both packages are rewritten. Every clause of `QueryFilters` is now implemented on every target, and the datasources are tested against a real PostgreSQL.

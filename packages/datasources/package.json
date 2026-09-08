@@ -1,9 +1,9 @@
 {
   "author": "",
   "dependencies": {
-    "@ormx/filters": "^0.2.0"
+    "@ormx/filters": "^0.3.0"
   },
-  "description": "Unified datasource abstraction for Drizzle, Prisma and Supabase with transaction support",
+  "description": "Unified datasource abstraction for Drizzle, Prisma, TypeORM and Supabase with transaction support",
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
     "@prisma/client": "^7.10.0",
@@ -11,6 +11,8 @@
     "drizzle-orm": "^0.45.1",
     "pglite-prisma-adapter": "^0.7.2",
     "prisma": "^7.10.0",
+    "typeorm": "^1.1.1",
+    "typeorm-pglite": "^0.3.4",
     "typescript": "^5.7.0",
     "vitest": "^5.0.0"
   },
@@ -30,6 +32,10 @@
     "./supabase": {
       "import": "./dist/supabase.js",
       "types": "./dist/supabase.d.ts"
+    },
+    "./typeorm": {
+      "import": "./dist/typeorm.js",
+      "types": "./dist/typeorm.d.ts"
     }
   },
   "files": [
@@ -43,6 +49,7 @@
     "drizzle",
     "prisma",
     "supabase",
+    "typeorm",
     "database",
     "orm"
   ],
@@ -52,13 +59,17 @@
   "name": "@ormx/datasources",
   "peerDependencies": {
     "@prisma/client": ">=6.2.0",
-    "drizzle-orm": ">=0.30.0"
+    "drizzle-orm": ">=0.30.0",
+    "typeorm": ">=1.0.0"
   },
   "peerDependenciesMeta": {
     "@prisma/client": {
       "optional": true
     },
     "drizzle-orm": {
+      "optional": true
+    },
+    "typeorm": {
       "optional": true
     }
   },
@@ -68,7 +79,7 @@
   "repository": {
     "directory": "packages/datasources",
     "type": "git",
-    "url": "https://github.com/Dyrits/ORMX.git"
+    "url": "git+https://github.com/Dyrits/ORMX.git"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -82,5 +93,5 @@
   },
   "type": "module",
   "types": "./dist/index.d.ts",
-  "version": "0.2.0"
+  "version": "0.3.0"
 }

@@ -1,6 +1,6 @@
 # @ormx/datasources
 
-Unified datasource abstraction for Drizzle, Prisma and Supabase with transaction support.
+Unified datasource abstraction for Drizzle, Prisma, TypeORM and Supabase with transaction support.
 
 Provides a common CRUD interface over a table or model, driven by [`@ormx/filters`](../filters/README.md) query filters. Swap the ORM without touching the code that uses the datasource.
 
@@ -12,7 +12,7 @@ npm install @ormx/datasources @ormx/filters
 bun add @ormx/datasources @ormx/filters
 ```
 
-Then install the client you use: `drizzle-orm`, `@prisma/client` (6.2 or later) or `@supabase/supabase-js`.
+Then install the client you use: `drizzle-orm`, `@prisma/client` (6.2 or later), TypeORM 1.0 or later, or `@supabase/supabase-js`.
 
 Import from a sub-path so you only load the target you use. The root export pulls in all three, so it requires every optional peer to be installed:
 
@@ -20,6 +20,7 @@ Import from a sub-path so you only load the target you use. The root export pull
 import { DrizzleDatasource, DrizzleTransactor } from "@ormx/datasources/drizzle";
 import { PrismaDatasource, PrismaTransactor } from "@ormx/datasources/prisma";
 import { SupabaseDatasource } from "@ormx/datasources/supabase";
+import { TypeOrmDatasource, TypeOrmTransactor } from "@ormx/datasources/typeorm";
 ```
 
 ## Interface
@@ -129,6 +130,29 @@ const [user] = await datasource.list({
 
 Text operators use `mode: "insensitive"`, which only PostgreSQL and MongoDB support. Pass `{ caseInsensitive: false }` as third constructor argument on other databases.
 
+## TypeORM
+
+Entity types are inferred from a class or `EntitySchema`. TypeORM 1.0 or later is required because `modify` uses PostgreSQL `RETURNING` to return every updated row.
+
+```typescript
+import { TypeOrmDatasource, TypeOrmTransactor } from "@ormx/datasources/typeorm";
+
+const usersDatasource = new TypeOrmDatasource(dataSource, User);
+const ordersDatasource = new TypeOrmDatasource(dataSource, Order);
+
+const user = await usersDatasource.store({ name: "John", email: "john@example.com" });
+const active = await usersDatasource.list({ where: { status: { Is: "active" } }, order: { createdAt: "desc" } });
+
+const transactor = new TypeOrmTransactor(dataSource);
+
+await transactor.transact(async (manager) => {
+  const user = await usersDatasource.withTransaction(manager).store({ name: "John" });
+  await ordersDatasource.withTransaction(manager).store({ userId: user.id, total: 100 });
+});
+```
+
+Selected relations are resolved through TypeORM entity metadata, including nested projections. Relation-scoped filtering, ordering and pagination throw because TypeORM's find options cannot express them without changing the parent query's meaning.
+
 ## Supabase
 
 ```typescript
@@ -151,16 +175,17 @@ The Supabase JS client has no transactions, so `withTransaction()` throws. For t
 
 `IDatasource` is the same shape everywhere, but two capabilities are not universal:
 
-| Capability                       | Drizzle | Prisma | Supabase |
-| -------------------------------- | ------- | ------ | -------- |
-| `withTransaction`                | yes     | yes    | throws   |
-| Relation selections in `list`    | throws  | yes    | yes      |
+| Capability                                  | Drizzle | Prisma | TypeORM   | Supabase |
+| ------------------------------------------- | ------- | ------ | --------- | -------- |
+| `withTransaction`                           | yes     | yes    | yes       | throws   |
+| Relation projections in `list`              | throws  | yes    | yes       | yes      |
+| Relation-scoped where/order/limit/offset     | throws  | yes    | throws    | yes      |
 
 A function typed against `IDatasource` alone cannot see these, so keep the concrete type where you rely on transactions or nested selections.
 
 ## Testing
 
-The Drizzle and Prisma datasources are tested against a real PostgreSQL through [PGlite](https://pglite.dev), including commit and rollback. Both run the same shared contract suite, so the implementations cannot drift. The Prisma client used by the tests is generated from `test/prisma/schema.prisma` by `bun run generate`, which the `test` and `typecheck` scripts run for you.
+The Drizzle, Prisma and TypeORM datasources are tested against PostgreSQL through [PGlite](https://pglite.dev), including commit and rollback. All three run the same shared contract suite, so the implementations cannot drift. The Prisma client used by the tests is generated from `test/prisma/schema.prisma` by `bun run generate`, which the `test` and `typecheck` scripts run for you.
 
 ## License
 

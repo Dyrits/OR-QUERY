@@ -1,6 +1,6 @@
 # @ormx/filters
 
-Unified query filtering across Prisma, Drizzle, and Supabase.
+Unified query filtering across Prisma, Drizzle, TypeORM, and Supabase.
 
 Write your filters once using a common format, then convert them to the native format of your ORM or database client. Where, select, order and pagination are all covered.
 
@@ -12,14 +12,15 @@ npm install @ormx/filters
 bun add @ormx/filters
 ```
 
-Drizzle support needs `drizzle-orm` installed. Prisma and Supabase support have no extra dependency.
+Drizzle support needs `drizzle-orm` installed and TypeORM support needs TypeORM 1.0 or later. Prisma and Supabase support have no extra dependency.
 
-Import from a sub-path to keep the other targets out of your bundle. The root export pulls in all three, so it requires `drizzle-orm` to be installed:
+Import from a sub-path to keep the other targets out of your bundle. The root export pulls in all four, so it requires the optional ORM peers to be installed:
 
 ```typescript
 import { buildPrismaFilters } from "@ormx/filters/prisma";
 import { buildDrizzleFilters } from "@ormx/filters/drizzle";
 import { buildSupabaseFilters } from "@ormx/filters/supabase";
+import { buildTypeOrmFilters } from "@ormx/filters/typeorm";
 ```
 
 ## Usage
@@ -57,7 +58,7 @@ const filters: QueryFilters<User> = {
 };
 ```
 
-`where` and `order` accept scalar fields only. Relations are queried through nested filters in `select`, which Prisma and Supabase support.
+`where` and `order` accept scalar fields only. Relations are queried through nested filters in `select`. Prisma and Supabase support every nested clause; TypeORM supports nested projection but not relation-scoped filtering, ordering or pagination.
 
 ### Prisma
 
@@ -119,6 +120,21 @@ Nested selections on relations are not supported by Drizzle's core query builder
 
 Individual builders are also available: `buildDrizzleWhere`, `buildDrizzleSelect`, `buildDrizzleOrder`.
 
+### TypeORM
+
+```typescript
+import { buildTypeOrmFilters } from "@ormx/filters/typeorm";
+
+const repository = dataSource.getRepository(User);
+const users = await repository.find(buildTypeOrmFilters(filters, repository.metadata));
+```
+
+Passing entity metadata enables relation loading and distinguishes boolean scalar selections from boolean relation selections. Nested relation projections are supported. TypeORM cannot apply `where`, `order`, `limit` or `offset` to a loaded relation without changing which parent rows match, so those nested clauses throw instead of changing semantics silently.
+
+`OneOf` groups are converted to TypeORM's array-of-where-objects form. Text operators use PostgreSQL `ILike`, and multiple operators on one field are combined with TypeORM's `And` operator.
+
+Individual builders are also available: `buildTypeOrmWhere`, `buildTypeOrmSelect`, `buildTypeOrmRelations`, `buildTypeOrmOrder`.
+
 ### Supabase
 
 ```typescript
@@ -136,23 +152,23 @@ Individual builders are also available: `buildSupabaseWhere`, `buildSupabaseOrde
 
 ## Operators
 
-| Operator     | Description                             | Prisma                            | Drizzle      | Supabase      |
-| ------------ | --------------------------------------- | --------------------------------- | ------------ | ------------- |
-| `Is`         | Equals                                  | `equals`                          | `eq`         | `eq`          |
-| `IsNot`      | Not equals                              | `not`                             | `ne`         | `neq`         |
-| `GT`         | Greater than                            | `gt`                              | `gt`         | `gt`          |
-| `GTE`        | Greater than or equal                   | `gte`                             | `gte`        | `gte`         |
-| `LT`         | Less than                               | `lt`                              | `lt`         | `lt`          |
-| `LTE`        | Less than or equal                      | `lte`                             | `lte`        | `lte`         |
-| `In`         | Value in array                          | `in`                              | `inArray`    | `in`          |
-| `NotIn`      | Value not in array                      | `notIn`                           | `notInArray` | `not.in`      |
-| `Contains`   | Contains substring (case-insensitive)   | `contains`, `mode: insensitive`   | `ilike`      | `ilike`       |
-| `StartsWith` | Starts with (case-insensitive)          | `startsWith`, `mode: insensitive` | `ilike`      | `ilike`       |
-| `EndsWith`   | Ends with (case-insensitive)            | `endsWith`, `mode: insensitive`   | `ilike`      | `ilike`       |
-| `IsNull`     | Is null                                 | `equals: null`                    | `isNull`     | `is.null`     |
-| `IsNotNull`  | Is not null                             | `not: null`                       | `isNotNull`  | `not.is.null` |
+| Operator     | Description                           | Prisma                            | Drizzle      | TypeORM          | Supabase      |
+| ------------ | ------------------------------------- | --------------------------------- | ------------ | ---------------- | ------------- |
+| `Is`         | Equals                                | `equals`                          | `eq`         | `Equal`          | `eq`          |
+| `IsNot`      | Not equals                            | `not`                             | `ne`         | `Not(Equal)`     | `neq`         |
+| `GT`         | Greater than                          | `gt`                              | `gt`         | `MoreThan`       | `gt`          |
+| `GTE`        | Greater than or equal                 | `gte`                             | `gte`        | `MoreThanOrEqual`| `gte`         |
+| `LT`         | Less than                             | `lt`                              | `lt`         | `LessThan`       | `lt`          |
+| `LTE`        | Less than or equal                    | `lte`                             | `lte`        | `LessThanOrEqual`| `lte`         |
+| `In`         | Value in array                        | `in`                              | `inArray`    | `In`             | `in`          |
+| `NotIn`      | Value not in array                    | `notIn`                           | `notInArray` | `Not(In)`        | `not.in`      |
+| `Contains`   | Contains substring (case-insensitive) | `contains`, `mode: insensitive`   | `ilike`      | `ILike`          | `ilike`       |
+| `StartsWith` | Starts with (case-insensitive)        | `startsWith`, `mode: insensitive` | `ilike`      | `ILike`          | `ilike`       |
+| `EndsWith`   | Ends with (case-insensitive)          | `endsWith`, `mode: insensitive`   | `ilike`      | `ILike`          | `ilike`       |
+| `IsNull`     | Is null                               | `equals: null`                    | `isNull`     | `IsNull`         | `is.null`     |
+| `IsNotNull`  | Is not null                           | `not: null`                       | `isNotNull`  | `Not(IsNull)`    | `not.is.null` |
 
-Rules that hold on all three targets:
+Rules that hold on all four targets:
 
 - Operators on the same field, and across fields, are combined with AND.
 - `undefined` and `null` values are skipped, so optional filters can be passed straight through. Falsy values such as `0`, `false` and `""` are kept.
@@ -177,12 +193,13 @@ This translates to `age >= 18 AND (status = 'active' OR (role = 'admin' AND emai
 
 ## Dialect support
 
-The builders target PostgreSQL, which is what all three clients are most often used with.
+The builders target PostgreSQL.
 
 | Target   | Requirement                                                                                       |
 | -------- | ------------------------------------------------------------------------------------------------- |
 | Prisma   | Text operators use `mode: "insensitive"`, PostgreSQL and MongoDB only. Disable with `caseInsensitive: false`. |
 | Drizzle  | Text operators emit `ilike`, which is PostgreSQL-specific. There is no option to change it yet.   |
+| TypeORM  | Requires TypeORM 1.0 or later. Text operators use PostgreSQL's `ILike` operator.                  |
 | Supabase | PostgREST is PostgreSQL-only.                                                                     |
 
 ## License
